@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>박건우 소개</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+<style>
+  :root{
+    --bg:#f6f4ee;
+    --bg-alt:#eeebe1;
+    --card:#ffffff;
+    --ink:#1f2a24;
+    --ink-soft:#5c6b62;
+    --rule:#dcd6c6;
+    --accent:#2f6d5c;
+    --accent-soft:#e4efe9;
+    --accent-2:#c96a3c;
+    --shadow: 0 20px 44px -26px rgba(31,42,36,0.35);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14201b;
+      --bg-alt:#0f1814;
+      --card:#1b2a23;
+      --ink:#eef2ee;
+      --ink-soft:#a9baaf;
+      --rule:#2d3d34;
+      --accent:#7fd6b8;
+      --accent-soft:#20342b;
+      --accent-2:#e6935f;
+      --shadow: 0 20px 44px -22px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14201b;
+    --bg-alt:#0f1814;
+    --card:#1b2a23;
+    --ink:#eef2ee;
+    --ink-soft:#a9baaf;
+    --rule:#2d3d34;
+    --accent:#7fd6b8;
+    --accent-soft:#20342b;
+    --accent-2:#e6935f;
+    --shadow: 0 20px 44px -22px rgba(0,0,0,0.6);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Noto Sans KR','Malgun Gothic',sans-serif;
+    line-height:1.75;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  .page{ max-width:920px; margin:0 auto; padding:0 24px 100px; }
+
+  /* ---------- Hero ---------- */
+  .hero{
+    position:relative;
+    margin:0 -24px 84px;
+    padding:88px 24px 90px;
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 0%, var(--accent-soft), transparent 65%),
+      var(--bg-alt);
+    text-align:center;
+    overflow:hidden;
+  }
+  .avatar{
+    width:104px; height:104px;
+    margin:0 auto 26px;
+    border-radius:50%;
+    background:linear-gradient(155deg, var(--accent), var(--accent-2));
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Jua','Malgun Gothic',sans-serif;
+    font-size:2.3rem;
+    color:#fff;
+    box-shadow:var(--shadow);
+  }
+  .hero-eyebrow{
+    font-weight:700;
+    font-size:0.82rem;
+    letter-spacing:0.28em;
+    color:var(--accent);
+    text-transform:uppercase;
+  }
+  .hero h1{
+    font-family:'Jua','Malgun Gothic',sans-serif;
+    font-weight:400;
+    font-size:clamp(2.2rem, 6vw, 3.1rem);
+    margin:16px 0 14px;
+    letter-spacing:0.01em;
+  }
+  .hero p{
+    max-width:44ch;
+    margin:0 auto;
+    font-size:1.08rem;
+    color:var(--ink-soft);
+  }
+  .hero-tags{
+    display:flex; justify-content:center; flex-wrap:wrap; gap:10px;
+    margin-top:26px;
+  }
+  .hero-tags span{
+    font-size:0.85rem;
+    font-weight:500;
+    color:var(--accent);
+    background:var(--accent-soft);
+    padding:6px 14px;
+    border-radius:999px;
+  }
+
+  /* ---------- Story sections ---------- */
+  .story{
+    display:flex;
+    align-items:center;
+    gap:44px;
+    margin-bottom:96px;
+  }
+  .story.reverse{ flex-direction:row-reverse; }
+  .story-media{
+    flex:0 0 42%;
+    background:var(--card);
+    border:1px solid var(--rule);
+    border-radius:16px;
+    padding:14px;
+    box-shadow:var(--shadow);
+  }
+  .story-media img{
+    display:block; width:100%; height:auto;
+    border-radius:10px;
+  }
+  .story-text{ flex:1; min-width:0; }
+  .story-index{
+    font-family:'Jua','Malgun Gothic',sans-serif;
+    font-size:0.95rem;
+    color:var(--accent-2);
+    letter-spacing:0.06em;
+    margin:0 0 8px;
+  }
+  .story-text h2{
+    font-family:'Jua','Malgun Gothic',sans-serif;
+    font-weight:400;
+    font-size:1.55rem;
+    margin:0 0 16px;
+    text-wrap:balance;
+  }
+  .story-text p{
+    margin:0;
+    color:var(--ink-soft);
+    font-size:1.02rem;
+    max-width:52ch;
+  }
+
+  @media (max-width:720px){
+    .story, .story.reverse{ flex-direction:column; }
+    .story-media{ flex:none; width:100%; }
+  }
+
+  /* ---------- Closing ---------- */
+  .closing{
+    text-align:center;
+    padding:52px 24px;
+    border-radius:16px;
+    background:var(--card);
+    border:1px solid var(--rule);
+    box-shadow:var(--shadow);
+  }
+  .closing p.big{
+    font-family:'Jua','Malgun Gothic',sans-serif;
+    font-size:1.6rem;
+    margin:0 0 8px;
+    color:var(--accent);
+  }
+  .closing p.small{
+    margin:0;
+    color:var(--ink-soft);
+    font-size:0.98rem;
+  }
+
+  footer{
+    text-align:center;
+    margin-top:48px;
+    font-size:0.85rem;
+    color:var(--ink-soft);
+    letter-spacing:0.04em;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="avatar">건</div>
+  <div class="hero-eyebrow">Self Introduction</div>
+  <h1>안녕하세요, 박건우입니다</h1>
+  <p>기획에서 개발까지, 경계를 넘나드는 멀티플레이어를 꿈꿉니다.</p>
+  <div class="hero-tags">
+    <span>UI/UX 기획자</span>
+    <span>산업공학 전공</span>
+    <span>거제도 출신</span>
+  </div>
+</div>
+
+<div class="page">
+
+  <section class="story">
+    <div class="story-media">
+      <img src="./소개_거제도에서_서울로.png" alt="거제도에서 서울로 향하는 여정 일러스트">
+    </div>
+    <div class="story-text">
+      <p class="story-index">01 · 성장 배경</p>
+      <h2>거제도에서 나고 자라, 스무 살에 서울로</h2>
+      <p>거제도에서 태어나 스무 살에 서울로 올라왔고, 대학교에서는 산업공학을 전공하며 논리적으로 문제를 분석하고 구조화하는 방법을 배웠습니다.</p>
+    </div>
+  </section>
+
+  <section class="story reverse">
+    <div class="story-media">
+      <img src="./소개_UIUX기획업무.png" alt="UI/UX 기획 업무 일러스트">
+    </div>
+    <div class="story-text">
+      <p class="story-index">02 · 현재 하는 일</p>
+      <h2>사용자의 니즈를 화면으로 설계하다</h2>
+      <p>현재는 회사에서 웹 및 앱 서비스의 UI/UX 기획 업무를 맡아, 사용자의 니즈를 파악하고 이를 실제 서비스 화면으로 설계하는 일을 하고 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="story">
+    <div class="story-media">
+      <img src="./소개_멀티플레이어목표.png" alt="기획과 개발을 넘나드는 멀티플레이어 일러스트">
+    </div>
+    <div class="story-text">
+      <p class="story-index">03 · 앞으로의 목표</p>
+      <h2>기획과 개발을 넘나드는 멀티플레이어로</h2>
+      <p>기획자로서 좋은 아이디어를 내는 것에서 그치지 않고, 직접 개발까지 이해하고 구현할 수 있는 사람이 되고 싶다는 생각이 들었습니다. 기획과 개발을 넘나드는 멀티플레이어로 성장하는 것이 저의 목표이며, 그 첫걸음으로 이 강의를 수강하게 되었습니다.</p>
+    </div>
+  </section>
+
+  <div class="closing">
+    <p class="big">잘 부탁드립니다.</p>
+    <p class="small">앞으로 좋은 인연으로 함께하고 싶습니다.</p>
+  </div>
+
+  <footer>박건우 · Self Introduction</footer>
+
+</div>
+
+</body>
+</html>

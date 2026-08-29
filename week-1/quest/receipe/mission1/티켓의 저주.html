@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>티켓의 저주</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Serif+KR:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --ink:#0a0a0c;
+    --surface:#151318;
+    --surface2:#1e1b21;
+    --crimson:#d21f3c;
+    --crimson-dim:#7a1526;
+    --gold:#e8b04b;
+    --paper:#ece6dc;
+    --smoke:#9a938f;
+    --line:#332f34;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:"Noto Serif KR", "Noto Sans KR", serif;
+    line-height:1.9;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(ellipse at 50% -10%, rgba(210,31,60,0.16), transparent 55%),
+      radial-gradient(ellipse at 90% 10%, rgba(232,176,75,0.08), transparent 45%);
+    background-attachment:fixed;
+  }
+
+  .wrap{max-width:760px;margin:0 auto;padding:0 24px 120px;}
+
+  /* ---------- Hero ---------- */
+  .hero{
+    padding:88px 24px 56px;
+    text-align:center;
+    border-bottom:1px solid var(--line);
+    position:relative;
+  }
+  .rating{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:"Noto Sans KR",sans-serif;
+    font-size:12px;letter-spacing:.14em;
+    color:var(--gold);
+    border:1px solid var(--gold);
+    padding:6px 14px;border-radius:999px;
+    text-transform:uppercase;
+    margin-bottom:28px;
+  }
+  .rating::before{content:"●";font-size:8px;color:var(--crimson);}
+
+  h1.title{
+    font-family:"Black Han Sans", "Noto Sans KR", sans-serif;
+    font-size:clamp(48px,11vw,96px);
+    color:var(--paper);
+    margin:0 0 6px;
+    letter-spacing:.02em;
+    text-wrap:balance;
+    text-shadow:0 0 40px rgba(210,31,60,.35);
+  }
+  .subtitle{
+    font-family:"Noto Serif KR",serif;
+    font-weight:500;
+    font-size:clamp(15px,2.4vw,19px);
+    color:var(--smoke);
+    margin:0 0 20px;
+  }
+  .byline{
+    font-family:"Noto Sans KR",sans-serif;
+    font-size:12px;
+    letter-spacing:.12em;
+    color:var(--crimson);
+    text-transform:uppercase;
+  }
+
+  .hero-art{margin:44px auto 8px;max-width:420px;}
+
+  /* ---------- Ticker ---------- */
+  .ticker-outer{
+    background:var(--crimson-dim);
+    border-top:1px solid var(--crimson);
+    border-bottom:1px solid var(--crimson);
+    overflow:hidden;
+    white-space:nowrap;
+    padding:10px 0;
+  }
+  .ticker-inner{
+    display:inline-block;
+    font-family:"Noto Sans KR",sans-serif;
+    font-size:12.5px;
+    letter-spacing:.06em;
+    color:#f3d9dd;
+    animation:scroll 26s linear infinite;
+  }
+  @keyframes scroll{
+    from{transform:translateX(0);}
+    to{transform:translateX(-50%);}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .ticker-inner{animation:none;}
+  }
+
+  /* ---------- Tension meter ---------- */
+  .tension{
+    display:flex;align-items:center;gap:10px;
+    font-family:"Noto Sans KR",sans-serif;
+    font-size:11px;letter-spacing:.1em;color:var(--smoke);
+    text-transform:uppercase;margin:6px 0 30px;
+  }
+  .tension-bar{
+    flex:1;height:6px;background:var(--surface2);
+    border-radius:999px;overflow:hidden;border:1px solid var(--line);
+  }
+  .tension-bar > i{
+    display:block;height:100%;
+    background:linear-gradient(90deg,var(--gold),var(--crimson));
+    border-radius:999px;
+  }
+  .tension-val{font-variant-numeric:tabular-nums;color:var(--gold);}
+
+  /* ---------- Episodes ---------- */
+  .episode{padding:72px 0 8px;border-bottom:1px solid var(--line);}
+  .episode:last-of-type{border-bottom:none;}
+  .ep-tag{
+    font-family:"Noto Sans KR",sans-serif;
+    font-size:12px;letter-spacing:.18em;color:var(--gold);
+    text-transform:uppercase;margin-bottom:10px;
+  }
+  h2.ep-title{
+    font-family:"Black Han Sans","Noto Sans KR",sans-serif;
+    font-size:clamp(28px,5vw,40px);
+    margin:0 0 28px;color:var(--paper);text-wrap:balance;
+  }
+  .ep-art{margin:8px auto 32px;max-width:260px;}
+  .ep-body p{
+    font-size:16.5px;color:#d8d2c8;margin:0 0 20px;
+    max-width:64ch;
+  }
+  blockquote{
+    margin:32px 0 0;padding:20px 24px;
+    border-left:3px solid var(--crimson);
+    background:var(--surface);
+    font-style:italic;color:var(--paper);
+    font-size:16px;
+  }
+
+  /* ---------- Finale box ---------- */
+  .finale{
+    margin-top:64px;padding:36px;
+    background:var(--surface);border:1px solid var(--line);
+    border-radius:4px;text-align:center;
+  }
+  .finale h3{
+    font-family:"Black Han Sans","Noto Sans KR",sans-serif;
+    font-size:22px;color:var(--crimson);margin:0 0 10px;letter-spacing:.02em;
+  }
+  .finale p{color:var(--smoke);font-family:"Noto Sans KR",sans-serif;font-size:13px;margin:0;}
+
+  /* ---------- Credits ---------- */
+  .credits{margin-top:56px;font-family:"Noto Sans KR",sans-serif;}
+  .credits h4{
+    font-size:11px;letter-spacing:.2em;color:var(--smoke);
+    text-transform:uppercase;margin:0 0 18px;text-align:center;
+  }
+  .credit-row{
+    display:flex;justify-content:space-between;gap:16px;
+    padding:12px 0;border-top:1px solid var(--line);
+    font-size:14px;
+  }
+  .credit-row:last-child{border-bottom:1px solid var(--line);}
+  .credit-role{color:var(--paper);}
+  .credit-name{color:var(--smoke);text-align:right;}
+
+  footer{
+    text-align:center;margin-top:60px;
+    font-family:"Noto Sans KR",sans-serif;
+    font-size:11px;letter-spacing:.1em;color:#5a5559;
+  }
+
+  svg{display:block;width:100%;height:auto;}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <span class="rating">15세 관람가 · 심장 약한 자 시청 주의</span>
+  <h1 class="title">티켓의&nbsp;저주</h1>
+  <p class="subtitle">한 장의 티켓이 불러온, 어느 주말의 심리 스릴러</p>
+  <p class="byline">실화 기반 · 장서진 단독 증언</p>
+
+  <div class="hero-art">
+    <svg viewBox="0 0 400 220" role="img" aria-label="어두운 무대 위로 스포트라이트가 쏟아지는 콘서트장 실루엣">
+      <defs>
+        <radialGradient id="spot" cx="50%" cy="0%" r="75%">
+          <stop offset="0%" stop-color="#e8b04b" stop-opacity="0.55"/>
+          <stop offset="100%" stop-color="#e8b04b" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="spot2" cx="30%" cy="0%" r="55%">
+          <stop offset="0%" stop-color="#d21f3c" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#d21f3c" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect x="0" y="0" width="400" height="220" fill="#101014"/>
+      <rect x="0" y="0" width="400" height="220" fill="url(#spot)"/>
+      <rect x="0" y="0" width="400" height="220" fill="url(#spot2)"/>
+      <polygon points="140,0 260,0 340,220 60,220" fill="#1a181d"/>
+      <polygon points="170,0 230,0 300,220 100,220" fill="#211d22" opacity="0.7"/>
+      <g fill="#0a0a0c">
+        <polygon points="90,220 110,150 122,150 130,220"/>
+        <polygon points="150,220 165,120 176,120 182,220"/>
+        <polygon points="196,220 208,90 220,90 230,220"/>
+        <polygon points="248,220 262,130 274,130 284,220"/>
+        <polygon points="300,220 312,155 322,155 332,220"/>
+      </g>
+      <circle cx="200" cy="16" r="3" fill="#e8b04b"/>
+      <circle cx="150" cy="10" r="2" fill="#e8b04b" opacity="0.8"/>
+      <circle cx="250" cy="10" r="2" fill="#e8b04b" opacity="0.8"/>
+    </svg>
+  </div>
+</div>
+
+<div class="ticker-outer">
+  <div class="ticker-inner">이 다큐드라마는 실제 인물, 실제 감정, 실제 분노에 기반하여 제작되었습니다 · 일부 장면은 극적으로 각색되었습니다 · 시청자의 심박수 상승에 대해 본 방송은 책임지지 않습니다 · &nbsp;이 다큐드라마는 실제 인물, 실제 감정, 실제 분노에 기반하여 제작되었습니다 · 일부 장면은 극적으로 각색되었습니다 · 시청자의 심박수 상승에 대해 본 방송은 책임지지 않습니다 · &nbsp;</div>
+</div>
+
+<div class="wrap">
+
+  <!-- Episode 1 -->
+  <section class="episode">
+    <div class="ep-tag">1화</div>
+    <h2 class="ep-title">예고 없는 초대장</h2>
+    <div class="tension">
+      <span>긴장도</span>
+      <div class="tension-bar"><i style="width:20%"></i></div>
+      <span class="tension-val">20%</span>
+    </div>
+
+    <div class="ep-art">
+      <svg viewBox="0 0 240 160" role="img" aria-label="느낌표가 담긴 메시지 말풍선">
+        <rect x="0" y="0" width="240" height="160" fill="#151318"/>
+        <rect x="40" y="36" width="160" height="80" rx="14" fill="#201b21" stroke="#332f34"/>
+        <polygon points="70,116 70,138 96,116" fill="#201b21" stroke="#332f34"/>
+        <line x1="62" y1="60" x2="178" y2="60" stroke="#5a5559" stroke-width="3" stroke-linecap="round"/>
+        <line x1="62" y1="78" x2="150" y2="78" stroke="#5a5559" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="185" cy="46" r="16" fill="#d21f3c"/>
+        <line x1="185" y1="38" x2="185" y2="48" stroke="#151318" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="185" cy="54" r="1.6" fill="#151318"/>
+      </svg>
+    </div>
+
+    <div class="ep-body">
+      <p>그 주말, 장서진의 평온한 일상에 예고 없는 초대장이 도착했다. 평소 알고 지내던 지인에게서 온 메시지 한 통. "나 빅뱅 콘서트 좋은 자리 티켓 있는데, 너한테 싸게 줄게." 아무렇지 않아 보이는 이 한 문장이, 이후 벌어질 모든 사건의 발단이 될 줄 그때의 서진은 전혀 알지 못했다.</p>
+      <p>그녀는 그저 기뻤다. 태양, 지드래곤, 대성의 무대를 가까이서 볼 수 있다는 생각에 며칠 밤을 설렘으로 지새웠다. 하지만 세상 모든 스릴러가 그렇듯, 행복은 그리 오래가지 않았다.</p>
+      <blockquote>"그날의 나는, 이것이 단순한 티켓 거래가 아니라 긴 심리전의 시작이라는 걸 몰랐다."</blockquote>
+    </div>
+  </section>
+
+  <!-- Episode 2 -->
+  <section class="episode">
+    <div class="ep-tag">2화</div>
+    <h2 class="ep-title">흔들리는 약속, 무너지는 신뢰</h2>
+    <div class="tension">
+      <span>긴장도</span>
+      <div class="tension-bar"><i style="width:55%"></i></div>
+      <span class="tension-val">55%</span>
+    </div>
+
+    <div class="ep-art">
+      <svg viewBox="0 0 240 160" role="img" aria-label="여러 방향을 가리키며 어긋나는 시계 바늘">
+        <rect x="0" y="0" width="240" height="160" fill="#151318"/>
+        <circle cx="120" cy="80" r="52" fill="#201b21" stroke="#332f34" stroke-width="2"/>
+        <circle cx="120" cy="80" r="3" fill="#e8b04b"/>
+        <line x1="120" y1="80" x2="120" y2="40" stroke="#e8b04b" stroke-width="3" stroke-linecap="round"/>
+        <line x1="120" y1="80" x2="152" y2="60" stroke="#d21f3c" stroke-width="3" stroke-linecap="round"/>
+        <line x1="120" y1="80" x2="90" y2="105" stroke="#9a938f" stroke-width="3" stroke-linecap="round"/>
+        <g fill="#5a5559">
+          <circle cx="120" cy="32" r="2"/>
+          <circle cx="168" cy="80" r="2"/>
+          <circle cx="120" cy="128" r="2"/>
+          <circle cx="72" cy="80" r="2"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="ep-body">
+      <p>약속된 시간은 저녁이었다. 그런데 저녁이 다가오자 지인에게서 연락이 왔다. "미안, 오늘은 시간이 안 될 것 같아. 내일 오전에 줄게." 서진은 애써 웃으며 알겠다고 답했다. 하지만 다음 날 오전이 되자 지인은 다시 말을 바꿨다. "오전엔 힘들 것 같고, 오후에 줄게."</p>
+      <p>약속 시간이 바뀔 때마다 서진의 심장은 철렁 내려앉았다. 혹시 티켓이 애초에 없었던 건 아닐까. 혹시 이대로 콘서트에 가지 못하는 건 아닐까. 불안은 눈덩이처럼 불어났고, 휴대폰 화면을 확인하는 손끝은 점점 떨려왔다.</p>
+      <p>그리고 마침내 콘서트 당일, 지인에게서 도착한 마지막 메시지. "콘서트장 앞 부스에서 만나서 줄게."</p>
+      <blockquote>"약속은 세 번 바뀌었다. 신뢰는 그보다 더 많이 무너졌다."</blockquote>
+    </div>
+  </section>
+
+  <!-- Episode 3 -->
+  <section class="episode">
+    <div class="ep-tag">3화</div>
+    <h2 class="ep-title">부스 앞의 결전</h2>
+    <div class="tension">
+      <span>긴장도</span>
+      <div class="tension-bar"><i style="width:92%"></i></div>
+      <span class="tension-val">92%</span>
+    </div>
+
+    <div class="ep-art">
+      <svg viewBox="0 0 240 160" role="img" aria-label="붉은 도장이 찍힌 콘서트 티켓">
+        <rect x="0" y="0" width="240" height="160" fill="#151318"/>
+        <rect x="42" y="46" width="156" height="68" rx="6" fill="#ece6dc"/>
+        <circle cx="120" cy="46" r="6" fill="#151318"/>
+        <circle cx="120" cy="114" r="6" fill="#151318"/>
+        <line x1="120" y1="52" x2="120" y2="108" stroke="#c9c2b4" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <line x1="56" y1="64" x2="106" y2="64" stroke="#9a938f" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="56" y1="76" x2="96" y2="76" stroke="#9a938f" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="56" y1="96" x2="106" y2="96" stroke="#c9c2b4" stroke-width="2.5" stroke-linecap="round"/>
+        <g transform="translate(163,86) rotate(-18)">
+          <circle r="24" fill="none" stroke="#d21f3c" stroke-width="3"/>
+          <text x="0" y="5" text-anchor="middle" font-family="Black Han Sans, sans-serif" font-size="13" fill="#d21f3c">진품</text>
+        </g>
+      </svg>
+    </div>
+
+    <div class="ep-body">
+      <p>공연 시작을 코앞에 둔 시각, 서진은 콘서트장 앞 부스 앞에 홀로 서 있었다. 손에는 아직 티켓이 없었다. 주변에서는 이미 입장을 시작한 관객들의 함성이 들려오고, 서진의 초조함은 극에 달했다. '혹시 이대로 못 들어가는 건 아닐까. 설마 이 모든 게 처음부터 잘못된 약속이었던 걸까.'</p>
+      <p>수많은 불길한 상상이 스쳐 지나가던 그 순간, 저 멀리서 낯익은 실루엣이 걸어왔다. 지인이었다. 그리고 그 손에는 서진이 그토록 기다려온 티켓 한 장이 들려 있었다.</p>
+      <blockquote>"그 티켓 한 장을 받아 드는 순간, 지난 며칠간의 스트레스가 파도처럼 밀려왔다가 순식간에 빠져나갔다."</blockquote>
+    </div>
+  </section>
+
+  <!-- Episode 4 -->
+  <section class="episode">
+    <div class="ep-tag">4화 · 최종화</div>
+    <h2 class="ep-title">무대 위의 진실, 그리고 다음 시즌 예고</h2>
+    <div class="tension">
+      <span>긴장도</span>
+      <div class="tension-bar"><i style="width:12%"></i></div>
+      <span class="tension-val">해소</span>
+    </div>
+
+    <div class="ep-art">
+      <svg viewBox="0 0 240 160" role="img" aria-label="환호하는 관객들과 쏟아지는 무대 조명">
+        <rect x="0" y="0" width="240" height="160" fill="#151318"/>
+        <defs>
+          <radialGradient id="glow2" cx="50%" cy="0%" r="80%">
+            <stop offset="0%" stop-color="#e8b04b" stop-opacity="0.5"/>
+            <stop offset="100%" stop-color="#e8b04b" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <rect x="0" y="0" width="240" height="160" fill="url(#glow2)"/>
+        <g fill="#0a0a0c">
+          <polygon points="30,160 42,120 48,120 56,160"/>
+          <polygon points="62,160 76,104 84,104 94,160"/>
+          <polygon points="102,160 114,90 122,90 132,160"/>
+          <polygon points="140,160 152,108 160,108 170,160"/>
+          <polygon points="178,160 190,124 198,124 208,160"/>
+        </g>
+        <g stroke="#e8b04b" stroke-width="1" opacity="0.7">
+          <line x1="120" y1="8" x2="70" y2="70"/>
+          <line x1="120" y1="8" x2="120" y2="70"/>
+          <line x1="120" y1="8" x2="170" y2="70"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="ep-body">
+      <p>자리는 원래 기대했던 것보다 무대에서 살짝 멀었다. 하지만 그런 건 더 이상 중요하지 않았다. 조명이 켜지고 태양, 지드래곤, 대성이 무대 위로 올라오는 순간, 서진은 그동안의 모든 우여곡절을 완전히 잊었다. 익숙한 전주가 흘러나오자 객석 전체가 하나의 목소리로 떼창을 했고, 화려한 조명이 밤하늘을 가득 채웠다. 그 순간만큼은 서진에게 그 어떤 약속 변경도, 그 어떤 불안도 존재하지 않았다.</p>
+      <p>공연이 끝난 뒤에도 여운은 쉽게 가시지 않았다. 집으로 돌아오는 내내 서진의 머릿속엔 오직 그 무대만이 맴돌았다.</p>
+      <p>그리고 그날 밤, 서진은 조용히 다짐했다. "내년엔 반드시, 무대 바로 앞자리에서 본다." 이 다짐이 또 어떤 새로운 사건을 불러올지는, 아직 아무도 모른다.</p>
+      <blockquote>"이야기는 끝나지 않는다. 단지, 다음 콘서트로 이어질 뿐이다."</blockquote>
+    </div>
+
+    <div class="finale">
+      <h3>시즌2 예고 — 「티켓의 저주: 맨 앞줄의 비밀」</h3>
+      <p>가제 · 방영 시기 미정 · 다음 콘서트가 열리는 날, 이야기는 계속된다</p>
+    </div>
+
+    <div class="credits">
+      <h4>출연</h4>
+      <div class="credit-row"><span class="credit-role">장서진</span><span class="credit-name">본인 (실화 당사자)</span></div>
+      <div class="credit-row"><span class="credit-role">지인</span><span class="credit-name">미스터리의 인물 · 약속 변경 전문</span></div>
+      <div class="credit-row"><span class="credit-role">태양 · 지드래곤 · 대성</span><span class="credit-name">특별출연</span></div>
+      <div class="credit-row"><span class="credit-role">콘서트장 부스</span><span class="credit-name">결전의 장소</span></div>
+    </div>
+  </section>
+
+  <footer>© 장서진 회고록 제작위원회 · 본 이야기는 극적 재미를 위해 각색되었습니다</footer>
+</div>
+
+</body>
+</html>
