@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR 코드 생성기</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+
+  <!-- 모든 CDN 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현 불가능한 것만 정의 */
+    @keyframes qr-pop {
+      from { opacity: 0; transform: scale(0.94); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .qr-pop { animation: qr-pop 0.25s ease-out; }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .toast-in { animation: toast-in 0.2s ease-out; }
+
+    /* 투명 배경 미리보기용 체커보드 */
+    .checkerboard {
+      background-image:
+        linear-gradient(45deg, #e5e7eb 25%, transparent 25%),
+        linear-gradient(-45deg, #e5e7eb 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #e5e7eb 75%),
+        linear-gradient(-45deg, transparent 75%, #e5e7eb 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+
+    /* 컬러 인풋의 기본 테두리/패딩 제거 */
+    input[type="color"] { -webkit-appearance: none; appearance: none; padding: 0; border: none; }
+    input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+    input[type="color"]::-webkit-color-swatch { border: none; border-radius: 0.5rem; }
+  </style>
+</head>
+<body class="bg-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({
+      children,
+      variant = 'primary',
+      size = 'md',
+      disabled = false,
+      onClick,
+      type = 'button',
+      className = '',
+      ...rest
+    }) {
+      const base =
+        'inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition ' +
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 ' +
+        'disabled:opacity-40 disabled:cursor-not-allowed';
+
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 shadow-sm',
+        secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 active:bg-slate-100',
+        danger: 'bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800 shadow-sm',
+        ghost: 'bg-transparent text-slate-600 hover:bg-slate-200/70 active:bg-slate-300/70',
+      };
+
+      const sizes = {
+        sm: 'text-xs px-3 py-1.5',
+        md: 'text-sm px-4 py-2.5',
+        lg: 'text-base px-6 py-3',
+      };
+
+      return (
+        <button
+          type={type}
+          onClick={onClick}
+          disabled={disabled}
+          className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({
+      id,
+      type = 'text',
+      label,
+      value,
+      onChange,
+      onBlur,
+      onKeyDown,
+      placeholder = '',
+      error = '',
+      hint = '',
+      disabled = false,
+      className = '',
+    }) {
+      const inputId = id || 'input-field';
+      const errorId = `${inputId}-error`;
+
+      const boxTone = error
+        ? 'border-rose-400 ring-1 ring-rose-200'
+        : 'border-slate-300 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100';
+
+      return (
+        <div className={className}>
+          {label && (
+            <label htmlFor={inputId} className="block text-sm font-semibold text-slate-700 mb-1.5">
+              {label}
+            </label>
+          )}
+          <div className={`flex items-center rounded-xl border bg-white transition ${boxTone} ${disabled ? 'bg-slate-100' : ''}`}>
+            <input
+              id={inputId}
+              type={type}
+              value={value}
+              onChange={onChange}
+              onBlur={onBlur}
+              onKeyDown={onKeyDown}
+              placeholder={placeholder}
+              disabled={disabled}
+              aria-invalid={!!error}
+              aria-describedby={error ? errorId : undefined}
+              className="w-full rounded-xl bg-transparent px-3 py-3 text-slate-900 placeholder-slate-400 outline-none disabled:cursor-not-allowed"
+            />
+          </div>
+          {error ? (
+            <p id={errorId} role="alert" className="mt-1.5 text-sm text-rose-600">{error}</p>
+          ) : hint ? (
+            <p className="mt-1.5 text-sm text-slate-500">{hint}</p>
+          ) : null}
+        </div>
+      );
+    }
+
+    function Select({ id, label, value, onChange, options, hint = '', className = '' }) {
+      const selectId = id || 'select-field';
+      return (
+        <div className={className}>
+          {label && (
+            <label htmlFor={selectId} className="block text-sm font-semibold text-slate-700 mb-1.5">
+              {label}
+            </label>
+          )}
+          <select
+            id={selectId}
+            value={value}
+            onChange={onChange}
+            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+          >
+            {options.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          {hint && <p className="mt-1.5 text-xs text-slate-500">{hint}</p>}
+        </div>
+      );
+    }
+
+    function ColorField({ label, value, onChange, disabled = false, className = '' }) {
+      return (
+        <div className={className}>
+          <span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</span>
+          <div className={`flex items-center gap-2 rounded-xl border border-slate-300 bg-white p-1.5 ${disabled ? 'opacity-40' : ''}`}>
+            <input
+              type="color"
+              value={value}
+              onChange={onChange}
+              disabled={disabled}
+              aria-label={label}
+              className="h-9 w-10 cursor-pointer rounded-lg disabled:cursor-not-allowed"
+            />
+            <span className="pr-1 font-mono text-xs uppercase text-slate-500">{value}</span>
+          </div>
+        </div>
+      );
+    }
+
+    function Card({ children, className = '' }) {
+      return (
+        <div className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ children, tone = 'slate', className = '' }) {
+      const tones = {
+        slate: 'bg-slate-100 text-slate-600',
+        indigo: 'bg-indigo-50 text-indigo-700',
+        emerald: 'bg-emerald-50 text-emerald-700',
+        rose: 'bg-rose-50 text-rose-700',
+      };
+      return (
+        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Toast({ message, tone = 'slate' }) {
+      if (!message) return null;
+      const tones = {
+        slate: 'bg-slate-900 text-white',
+        emerald: 'bg-emerald-600 text-white',
+        rose: 'bg-rose-600 text-white',
+      };
+      return (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+          <div role="status" className={`toast-in rounded-full px-5 py-2.5 text-sm font-medium shadow-lg ${tones[tone]}`}>
+            {message}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🛠️ Utilities (URL / QR 헬퍼)
+    // ========================================
+
+    const HISTORY_KEY = 'qr-generator:history';
+    const HISTORY_MAX = 8;
+
+    // 스킴이 없으면 https:// 를 붙여준다
+    function normalizeUrl(raw) {
+      const text = String(raw || '').trim();
+      if (!text) return '';
+      if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return text; // http:, https:, mailto:, tel: ...
+      return `https://${text}`;
+    }
+
+    function validateUrl(raw) {
+      const text = String(raw || '').trim();
+      if (!text) return '';
+      if (/\s/.test(text)) return '주소에 공백이 포함될 수 없습니다.';
+
+      let parsed;
+      try {
+        parsed = new URL(normalizeUrl(text));
+      } catch (e) {
+        return '올바른 URL 형식이 아닙니다. (예: example.com)';
+      }
+
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        const host = parsed.hostname;
+        const isLocal = host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+        if (!isLocal && !/^[^.]+(\.[^.]+)+$/.test(host)) {
+          return '도메인 형식을 확인해 주세요. (예: example.com)';
+        }
+      }
+      return '';
+    }
+
+    function safeFileName(rawUrl) {
+      try {
+        const host = new URL(normalizeUrl(rawUrl)).hostname.replace(/^www\./, '');
+        return `qr-${host.replace(/[^a-z0-9.-]/gi, '-')}`;
+      } catch (e) {
+        return 'qr-code';
+      }
+    }
+
+    function triggerDownload(href, fileName) {
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+    }
+
+    function loadHistory() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed.slice(0, HISTORY_MAX) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveHistory(list) {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX)));
+      } catch (e) {
+        /* 프라이빗 모드 등에서 저장 실패 시 무시 */
+      }
+    }
+
+    // ========================================
+    // 🧩 Common / Layout Components
+    // ========================================
+
+    const QR_ICON_PATH =
+      'M3 3h8v8H3V3zm2 2v4h4V5H5zM13 3h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm8-2h3v3h-3v-3zm5 0h3v3h-3v-3zm-5 5h3v3h-3v-3zm5 0h3v3h-3v-3z';
+
+    function Header() {
+      return (
+        <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
+          <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-4 sm:px-6">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor" aria-hidden="true">
+                <path d={QR_ICON_PATH} />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-slate-900 sm:text-xl">QR 코드 생성기</h1>
+              <p className="text-xs text-slate-500 sm:text-sm">웹사이트 주소를 입력하면 바로 QR 코드로 만들어 드려요.</p>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="mt-10 border-t border-slate-200 py-6">
+          <p className="text-center text-xs text-slate-400">
+            모든 처리는 브라우저 안에서만 이루어집니다. 입력한 주소는 서버로 전송되지 않습니다.
+          </p>
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+
+    const SIZE_OPTIONS = [
+      { value: '256', label: '256 × 256 (작게)' },
+      { value: '512', label: '512 × 512 (기본)' },
+      { value: '768', label: '768 × 768 (크게)' },
+      { value: '1024', label: '1024 × 1024 (인쇄용)' },
+    ];
+
+    const LEVEL_OPTIONS = [
+      { value: 'L', label: 'L — 약 7% 복원' },
+      { value: 'M', label: 'M — 약 15% 복원 (기본)' },
+      { value: 'Q', label: 'Q — 약 25% 복원' },
+      { value: 'H', label: 'H — 약 30% 복원' },
+    ];
+
+    const MARGIN_OPTIONS = [
+      { value: '0', label: '없음' },
+      { value: '2', label: '보통 (기본)' },
+      { value: '4', label: '넓게' },
+    ];
+
+    const COLOR_PRESETS = [
+      { name: '기본 검정', fg: '#0F172A', bg: '#FFFFFF' },
+      { name: '인디고', fg: '#4338CA', bg: '#EEF2FF' },
+      { name: '에메랄드', fg: '#065F46', bg: '#ECFDF5' },
+      { name: '반전', fg: '#FFFFFF', bg: '#0F172A' },
+    ];
+
+    const DEFAULT_OPTIONS = {
+      size: '512',
+      level: 'M',
+      margin: '2',
+      fg: '#0F172A',
+      bg: '#FFFFFF',
+      transparent: false,
+    };
+
+    function QrPreview({ dataUrl, loading, transparent, hasInput }) {
+      const boxTone = transparent && dataUrl ? 'checkerboard' : 'bg-slate-50';
+
+      return (
+        <div className={`flex aspect-square w-full max-w-xs items-center justify-center overflow-hidden rounded-2xl border border-slate-200 p-3 ${boxTone}`}>
+          {loading ? (
+            <div className="flex flex-col items-center gap-3 text-slate-400">
+              <svg className="h-8 w-8 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              <span className="text-sm">생성 중…</span>
+            </div>
+          ) : dataUrl ? (
+            <img src={dataUrl} alt="생성된 QR 코드" className="qr-pop h-full w-full object-contain" />
+          ) : (
+            <div className="flex flex-col items-center gap-2 px-6 text-center text-slate-400">
+              <svg viewBox="0 0 24 24" className="h-12 w-12" fill="currentColor" aria-hidden="true">
+                <path d={QR_ICON_PATH} />
+              </svg>
+              <p className="text-sm font-medium">
+                {hasInput ? '주소를 확인해 주세요' : '주소를 입력하면 여기에 QR 코드가 나타납니다'}
+              </p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function HistoryList({ items, onSelect, onClear }) {
+      if (items.length === 0) {
+        return (
+          <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-400">
+            아직 만든 QR 코드가 없습니다.
+          </p>
+        );
+      }
+
+      return (
+        <div className="space-y-2">
+          <ul className="space-y-2">
+            {items.map((item) => (
+              <li key={item.url}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(item.url)}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition hover:border-indigo-300 hover:bg-indigo-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                >
+                  <span className="truncate text-sm text-slate-700">{item.url}</span>
+                  <span className="shrink-0 text-xs text-slate-400">불러오기</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <Button variant="ghost" size="sm" onClick={onClear} className="w-full">
+            기록 모두 지우기
+          </Button>
+        </div>
+      );
+    }
+
+    function QrGeneratorPage() {
+      const [url, setUrl] = useState('');
+      const [options, setOptions] = useState(DEFAULT_OPTIONS);
+      const [dataUrl, setDataUrl] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const [history, setHistory] = useState(loadHistory);
+      const [toast, setToast] = useState({ message: '', tone: 'slate' });
+
+      const toastTimerRef = useRef(null);
+
+      const showToast = useCallback((message, tone = 'slate') => {
+        setToast({ message, tone });
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(() => setToast({ message: '', tone: 'slate' }), 2200);
+      }, []);
+
+      useEffect(() => () => {
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      }, []);
+
+      const validationError = useMemo(() => validateUrl(url), [url]);
+      const targetUrl = useMemo(
+        () => (url.trim() && !validationError ? normalizeUrl(url) : ''),
+        [url, validationError]
+      );
+
+      const qrOptions = useMemo(() => ({
+        width: Number(options.size),
+        margin: Number(options.margin),
+        errorCorrectionLevel: options.level,
+        color: {
+          dark: options.fg,
+          light: options.transparent ? '#00000000' : options.bg,
+        },
+      }), [options]);
+
+      // 입력/옵션이 바뀌면 디바운스 후 QR 재생성
+      useEffect(() => {
+        if (!targetUrl) {
+          setDataUrl('');
+          setLoading(false);
+          setError('');
+          return;
+        }
+
+        let cancelled = false;
+        setLoading(true);
+
+        const timer = setTimeout(() => {
+          window.QRCode.toDataURL(targetUrl, qrOptions)
+            .then((result) => {
+              if (cancelled) return;
+              setDataUrl(result);
+              setError('');
+              setLoading(false);
+            })
+            .catch((err) => {
+              if (cancelled) return;
+              setDataUrl('');
+              setError(`QR 코드를 만들지 못했습니다: ${err.message}`);
+              setLoading(false);
+            });
+        }, 320);
+
+        return () => {
+          cancelled = true;
+          clearTimeout(timer);
+        };
+      }, [targetUrl, qrOptions]);
+
+      const updateOption = useCallback((key, value) => {
+        setOptions((prev) => ({ ...prev, [key]: value }));
+      }, []);
+
+      const rememberUrl = useCallback((value) => {
+        if (!value) return;
+        setHistory((prev) => {
+          const next = [{ url: value, ts: Date.now() }, ...prev.filter((item) => item.url !== value)]
+            .slice(0, HISTORY_MAX);
+          saveHistory(next);
+          return next;
+        });
+      }, []);
+
+      const handleDownloadPng = useCallback(() => {
+        if (!dataUrl) return;
+        triggerDownload(dataUrl, `${safeFileName(targetUrl)}.png`);
+        rememberUrl(targetUrl);
+        showToast('PNG 파일을 저장했습니다.', 'emerald');
+      }, [dataUrl, targetUrl, rememberUrl, showToast]);
+
+      const handleDownloadSvg = useCallback(() => {
+        if (!targetUrl) return;
+        window.QRCode.toString(targetUrl, { ...qrOptions, type: 'svg' })
+          .then((svg) => {
+            const blobUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+            triggerDownload(blobUrl, `${safeFileName(targetUrl)}.svg`);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            rememberUrl(targetUrl);
+            showToast('SVG 파일을 저장했습니다.', 'emerald');
+          })
+          .catch(() => showToast('SVG 저장에 실패했습니다.', 'rose'));
+      }, [targetUrl, qrOptions, rememberUrl, showToast]);
+
+      const handleCopyImage = useCallback(async () => {
+        if (!dataUrl) return;
+        try {
+          if (!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) {
+            throw new Error('clipboard-unsupported');
+          }
+          const blob = await (await fetch(dataUrl)).blob();
+          await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
+          rememberUrl(targetUrl);
+          showToast('QR 이미지를 클립보드에 복사했습니다.', 'emerald');
+        } catch (e) {
+          showToast('이 브라우저에서는 이미지 복사를 지원하지 않습니다.', 'rose');
+        }
+      }, [dataUrl, targetUrl, rememberUrl, showToast]);
+
+      const handleClearHistory = useCallback(() => {
+        setHistory([]);
+        saveHistory([]);
+        showToast('기록을 모두 지웠습니다.');
+      }, [showToast]);
+
+      const handleReset = useCallback(() => {
+        setOptions(DEFAULT_OPTIONS);
+        showToast('옵션을 기본값으로 되돌렸습니다.');
+      }, [showToast]);
+
+      const hasResult = !!dataUrl && !loading;
+
+      return (
+        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+
+            {/* 왼쪽: 주소 입력 + 옵션 + 기록 */}
+            <div className="space-y-6 lg:col-span-3">
+              <Card>
+                <Input
+                  id="site-url"
+                  label="웹사이트 주소"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  onBlur={() => { if (targetUrl) rememberUrl(targetUrl); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && targetUrl) rememberUrl(targetUrl); }}
+                  placeholder="example.com 또는 https://example.com"
+                  error={url.trim() ? validationError : ''}
+                  hint="https:// 를 빼고 입력해도 자동으로 붙여 드립니다."
+                />
+
+                {targetUrl && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <Badge tone="indigo">인식될 주소</Badge>
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-600">{targetUrl}</span>
+                  </div>
+                )}
+              </Card>
+
+              <Card>
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-base font-bold text-slate-900">코드 옵션</h2>
+                  <Button variant="ghost" size="sm" onClick={handleReset}>기본값으로</Button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Select
+                    id="opt-size"
+                    label="크기"
+                    value={options.size}
+                    onChange={(e) => updateOption('size', e.target.value)}
+                    options={SIZE_OPTIONS}
+                  />
+                  <Select
+                    id="opt-level"
+                    label="오류 정정 수준"
+                    value={options.level}
+                    onChange={(e) => updateOption('level', e.target.value)}
+                    options={LEVEL_OPTIONS}
+                    hint="높을수록 손상에 강하지만 패턴이 촘촘해집니다."
+                  />
+                  <Select
+                    id="opt-margin"
+                    label="여백"
+                    value={options.margin}
+                    onChange={(e) => updateOption('margin', e.target.value)}
+                    options={MARGIN_OPTIONS}
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <ColorField
+                      label="코드 색"
+                      value={options.fg}
+                      onChange={(e) => updateOption('fg', e.target.value.toUpperCase())}
+                    />
+                    <ColorField
+                      label="배경 색"
+                      value={options.bg}
+                      onChange={(e) => updateOption('bg', e.target.value.toUpperCase())}
+                      disabled={options.transparent}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className="mr-1 text-sm font-semibold text-slate-700">프리셋</span>
+                  {COLOR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => setOptions((prev) => ({ ...prev, fg: preset.fg, bg: preset.bg, transparent: false }))}
+                      aria-label={`${preset.name} 색상 적용`}
+                      className="flex items-center gap-2 rounded-full border border-slate-200 py-1 pl-1 pr-3 text-xs text-slate-600 transition hover:border-indigo-300 hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    >
+                      <span
+                        className="h-5 w-5 rounded-full border border-slate-200"
+                        style={{ background: `linear-gradient(135deg, ${preset.fg} 50%, ${preset.bg} 50%)` }}
+                      />
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={options.transparent}
+                    onChange={(e) => updateOption('transparent', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  배경을 투명하게 (PNG 저장 시 유지)
+                </label>
+
+                {options.transparent && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    투명 배경은 어두운 바탕에 올리면 인식률이 떨어질 수 있습니다.
+                  </p>
+                )}
+              </Card>
+
+              <Card>
+                <h2 className="mb-4 text-base font-bold text-slate-900">최근 만든 주소</h2>
+                <HistoryList items={history} onSelect={setUrl} onClear={handleClearHistory} />
+              </Card>
+            </div>
+
+            {/* 오른쪽: 미리보기 + 내려받기 */}
+            <div className="lg:col-span-2">
+              <div className="lg:sticky lg:top-6">
+                <Card className="flex flex-col items-center">
+                  <h2 className="mb-4 self-start text-base font-bold text-slate-900">미리보기</h2>
+
+                  <QrPreview
+                    dataUrl={dataUrl}
+                    loading={loading}
+                    transparent={options.transparent}
+                    hasInput={!!url.trim()}
+                  />
+
+                  <p aria-live="polite" className="mt-3 min-h-[1.25rem] text-center text-xs text-slate-500">
+                    {error
+                      ? error
+                      : hasResult
+                        ? `${options.size} × ${options.size} · 정정수준 ${options.level}`
+                        : ''}
+                  </p>
+
+                  <div className="mt-4 grid w-full grid-cols-1 gap-2">
+                    <Button onClick={handleDownloadPng} disabled={!hasResult}>PNG로 저장</Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button variant="secondary" onClick={handleDownloadSvg} disabled={!hasResult}>SVG로 저장</Button>
+                      <Button variant="secondary" onClick={handleCopyImage} disabled={!hasResult}>이미지 복사</Button>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-center text-xs text-slate-400">
+                    저장하기 전에 휴대폰 카메라로 한 번 스캔해 확인해 보세요.
+                  </p>
+                </Card>
+              </div>
+            </div>
+          </div>
+
+          <Toast message={toast.message} tone={toast.tone} />
+        </main>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+
+    function App() {
+      return (
+        <div className="min-h-screen bg-slate-100 text-slate-900">
+          <Header />
+          <QrGeneratorPage />
+          <Footer />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

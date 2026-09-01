@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR 코드 생성기</title>
+
+  <!-- ⚠️ 모든 CDN 은 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <!-- QR 인코더 (모듈 배열만 얻고 캔버스·SVG 렌더링은 아래에서 직접 처리) -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현 불가한 것만 최소한으로 */
+    @keyframes toast-in {
+      from { opacity: 0; transform: translate(-50%, 12px); }
+      to   { opacity: 1; transform: translate(-50%, 0); }
+    }
+    .toast { transform: translateX(-50%); animation: toast-in .18s ease-out; }
+
+    /* 체크무늬 배경 — 밝은 QR 배경색도 미리보기에서 구분되게 */
+    .checkerboard {
+      background-color: #f8fafc;
+      background-image:
+        linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+        linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+        linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+    // ========================================
+    // 🛠 Constants & Utilities
+    // ========================================
+
+    const STORAGE_KEY = 'qr-generator/history/v1';
+
+    const TABS = [
+      { id: 'text',    icon: '🔗', label: '텍스트 / URL' },
+      { id: 'wifi',    icon: '📶', label: 'Wi-Fi' },
+      { id: 'contact', icon: '👤', label: '연락처' },
+      { id: 'email',   icon: '✉️', label: '이메일' },
+      { id: 'sms',     icon: '💬', label: 'SMS' },
+    ];
+
+    const EC_LEVELS = [
+      { value: 'L', label: 'L · 낮음 (약 7% 복원)' },
+      { value: 'M', label: 'M · 보통 (약 15% 복원)' },
+      { value: 'Q', label: 'Q · 높음 (약 25% 복원)' },
+      { value: 'H', label: 'H · 최고 (약 30% 복원)' },
+    ];
+
+    const ENCRYPTIONS = [
+      { value: 'WPA',    label: 'WPA / WPA2 / WPA3' },
+      { value: 'WEP',    label: 'WEP' },
+      { value: 'nopass', label: '비밀번호 없음 (개방형)' },
+    ];
+
+    const COLOR_PRESETS = [
+      { name: '클래식',   dark: '#000000', light: '#ffffff' },
+      { name: '미드나잇', dark: '#0f172a', light: '#f8fafc' },
+      { name: '인디고',   dark: '#4338ca', light: '#eef2ff' },
+      { name: '포레스트', dark: '#14532d', light: '#f0fdf4' },
+      { name: '와인',     dark: '#7f1d1d', light: '#fef2f2' },
+    ];
+
+    const DEFAULT_OPTIONS = {
+      size: 512,
+      margin: 2,
+      level: 'M',
+      dark: '#0f172a',
+      light: '#ffffff',
+    };
+
+    const EMPTY_FORMS = {
+      text:    { value: '' },
+      wifi:    { ssid: '', password: '', encryption: 'WPA', hidden: false },
+      contact: { name: '', org: '', title: '', phone: '', email: '', url: '' },
+      email:   { to: '', subject: '', body: '' },
+      sms:     { phone: '', message: '' },
+    };
+
+    /** Wi-Fi / vCard 규격에서 의미를 갖는 문자 이스케이프 */
+    const escapeWifi = (value) => String(value).replace(/([\\;,":])/g, '\\$1');
+    const escapeVCard = (value) => String(value).replace(/([\\;,])/g, '\\$1');
+
+    /** 탭별 폼 데이터를 실제 QR 에 인코딩할 문자열로 변환 */
+    function buildContent(type, form) {
+      if (type === 'text') {
+        return form.value.trim();
+      }
+
+      if (type === 'wifi') {
+        if (!form.ssid.trim()) return '';
+        let out = `WIFI:T:${form.encryption};S:${escapeWifi(form.ssid.trim())};`;
+        if (form.encryption !== 'nopass') out += `P:${escapeWifi(form.password)};`;
+        if (form.hidden) out += 'H:true;';
+        return out + ';';
+      }
+
+      if (type === 'contact') {
+        if (!form.name.trim()) return '';
+        const lines = ['BEGIN:VCARD', 'VERSION:3.0'];
+        lines.push(`N:${escapeVCard(form.name.trim())};;;;`);
+        lines.push(`FN:${escapeVCard(form.name.trim())}`);
+        if (form.org.trim())   lines.push(`ORG:${escapeVCard(form.org.trim())}`);
+        if (form.title.trim()) lines.push(`TITLE:${escapeVCard(form.title.trim())}`);
+        if (form.phone.trim()) lines.push(`TEL;TYPE=CELL:${form.phone.trim()}`);
+        if (form.email.trim()) lines.push(`EMAIL:${form.email.trim()}`);
+        if (form.url.trim())   lines.push(`URL:${form.url.trim()}`);
+        lines.push('END:VCARD');
+        return lines.join('\n');
+      }
+
+      if (type === 'email') {
+        if (!form.to.trim()) return '';
+        const params = [];
+        if (form.subject.trim()) params.push(`subject=${encodeURIComponent(form.subject.trim())}`);
+        if (form.body.trim())    params.push(`body=${encodeURIComponent(form.body.trim())}`);
+        return `mailto:${form.to.trim()}` + (params.length ? `?${params.join('&')}` : '');
+      }
+
+      if (type === 'sms') {
+        if (!form.phone.trim()) return '';
+        const number = form.phone.replace(/[^0-9+*#]/g, '');
+        return `SMSTO:${number}:${form.message.trim()}`;
+      }
+
+      return '';
+    }
+
+    /** 탭별 "무엇을 입력해야 하는지" 안내 문구 */
+    const EMPTY_HINTS = {
+      text: 'URL 이나 문장을 입력하세요.',
+      wifi: '네트워크 이름(SSID)을 입력하세요.',
+      contact: '이름을 입력하세요.',
+      email: '받는 사람 주소를 입력하세요.',
+      sms: '보낼 전화번호를 입력하세요.',
+    };
+
+    /** 색상 코드를 직접 타이핑하는 중(#0f1 등)에는 마지막 유효값 대신 기본값을 쓴다 */
+    const safeHex = (hex, fallback) => (/^#[0-9a-f]{6}$/i.test(hex) ? hex : fallback);
+
+    const hexToRgb = (hex) => {
+      const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
+    };
+
+    const relativeLuminance = (hex) => {
+      const [r, g, b] = hexToRgb(hex).map((v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+
+    /** 스캐너가 명암을 구분할 수 있는지 판단하기 위한 대비비 */
+    const contrastRatio = (a, b) => {
+      const la = relativeLuminance(a);
+      const lb = relativeLuminance(b);
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    };
+
+    const byteLength = (str) => new TextEncoder().encode(str).length;
+
+    const formatDate = (ts) =>
+      new Date(ts).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const truncate = (str, len = 42) => {
+      const flat = str.replace(/\s+/g, ' ');
+      return flat.length > len ? flat.slice(0, len) + '…' : flat;
+    };
+
+    /** 브라우저 다운로드 트리거 (Blob URL 은 사용 후 해제) */
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    const readHistory = () => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    };
+
+    const writeHistory = (items) => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      } catch (e) {
+        /* 저장 공간 부족 · 프라이빗 모드 — 히스토리는 부가 기능이므로 무시 */
+      }
+    };
+
+    // ---- QR 인코딩 · 렌더링 -------------------------------------------------
+
+    /** 한글 등 멀티바이트 문자를 위해 UTF-8 인코더로 교체 */
+    if (typeof qrcode !== 'undefined') {
+      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+    }
+
+    /** 내용을 QR 모델로 인코딩 (typeNumber 0 = 버전 자동 선택) */
+    function createQrModel(content, level) {
+      const model = qrcode(0, level);
+      model.addData(content, 'Byte');
+      model.make();
+      return model;
+    }
+
+    /** 모델을 캔버스에 직접 그린다 — 실제 출력 픽셀 크기를 반환 */
+    function drawQrToCanvas(canvas, model, { size, margin, dark, light }) {
+      const count = model.getModuleCount();
+      const total = count + margin * 2;
+      const cell = Math.max(1, Math.floor(size / total));   // 모듈 경계가 흐려지지 않게 정수 픽셀로
+      const dimension = cell * total;
+
+      canvas.width = dimension;
+      canvas.height = dimension;
+
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = light;
+      ctx.fillRect(0, 0, dimension, dimension);
+      ctx.fillStyle = dark;
+
+      for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+          if (model.isDark(row, col)) {
+            ctx.fillRect((col + margin) * cell, (row + margin) * cell, cell, cell);
+          }
+        }
+      }
+      return dimension;
+    }
+
+    /** 같은 모델을 벡터로 — 아무리 확대해도 깨지지 않는 SVG 문자열 */
+    function buildQrSvg(model, { size, margin, dark, light }) {
+      const count = model.getModuleCount();
+      const total = count + margin * 2;
+      let path = '';
+
+      for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+          if (model.isDark(row, col)) path += `M${col + margin} ${row + margin}h1v1h-1z`;
+        }
+      }
+
+      return [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges">`,
+        `<rect width="${total}" height="${total}" fill="${light}"/>`,
+        `<path d="${path}" fill="${dark}"/>`,
+        '</svg>',
+      ].join('\n');
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
+      const base = 'inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-colors ' +
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 ' +
+        'disabled:opacity-40 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm shadow-indigo-600/20',
+        secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50',
+        danger: 'bg-rose-600 text-white hover:bg-rose-700',
+        ghost: 'text-slate-500 hover:bg-slate-100 hover:text-slate-700',
+      };
+      const sizes = {
+        sm: 'text-xs px-3 py-1.5',
+        md: 'text-sm px-4 py-2.5',
+        lg: 'text-base px-5 py-3',
+      };
+      return (
+        <button type="button" className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...props}>
+          {children}
+        </button>
+      );
+    }
+
+    function Field({ label, hint, htmlFor, children, className = '' }) {
+      return (
+        <div className={`space-y-1.5 ${className}`}>
+          {label && (
+            <label htmlFor={htmlFor} className="block text-xs font-semibold text-slate-600">
+              {label}
+            </label>
+          )}
+          {children}
+          {hint && <p className="text-[11px] text-slate-400">{hint}</p>}
+        </div>
+      );
+    }
+
+    const inputClass = (error) =>
+      'w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400 ' +
+      'transition focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:bg-slate-50 disabled:text-slate-400 ' +
+      (error ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-indigo-500');
+
+    function Input({ id, label, hint, error, className = '', ...props }) {
+      return (
+        <Field label={label} hint={error || hint} htmlFor={id} className={className}>
+          <input id={id} className={inputClass(error)} aria-invalid={!!error} {...props} />
+        </Field>
+      );
+    }
+
+    function Textarea({ id, label, hint, rows = 4, className = '', ...props }) {
+      return (
+        <Field label={label} hint={hint} htmlFor={id} className={className}>
+          <textarea id={id} rows={rows} className={`${inputClass(false)} resize-y`} {...props} />
+        </Field>
+      );
+    }
+
+    function Select({ id, label, hint, options, className = '', ...props }) {
+      return (
+        <Field label={label} hint={hint} htmlFor={id} className={className}>
+          <select id={id} className={`${inputClass(false)} cursor-pointer`} {...props}>
+            {options.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </Field>
+      );
+    }
+
+    function Range({ id, label, value, suffix = '', className = '', ...props }) {
+      return (
+        <div className={`space-y-2 ${className}`}>
+          <div className="flex items-baseline justify-between">
+            <label htmlFor={id} className="text-xs font-semibold text-slate-600">{label}</label>
+            <span className="font-mono text-xs text-slate-500">{value}{suffix}</span>
+          </div>
+          <input
+            id={id}
+            type="range"
+            value={value}
+            className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-indigo-600"
+            {...props}
+          />
+        </div>
+      );
+    }
+
+    function ColorInput({ id, label, value, onChange }) {
+      return (
+        <Field label={label} htmlFor={id}>
+          <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-2 py-1.5">
+            <input
+              id={id}
+              type="color"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              className="h-8 w-9 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+              aria-label={`${label} 색상 선택`}
+            />
+            <input
+              type="text"
+              value={value.toUpperCase()}
+              onChange={(e) => {
+                const raw = e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}`;
+                if (/^#[0-9a-f]{0,6}$/i.test(raw)) onChange(raw.toLowerCase());
+              }}
+              className="w-full bg-transparent font-mono text-sm text-slate-700 focus:outline-none"
+              aria-label={`${label} 색상 코드`}
+            />
+          </div>
+        </Field>
+      );
+    }
+
+    function Switch({ id, label, checked, onChange }) {
+      return (
+        <label htmlFor={id} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5">
+          <span className="text-sm text-slate-700">{label}</span>
+          <span className="relative inline-flex shrink-0">
+            <input
+              id={id}
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => onChange(e.target.checked)}
+              className="peer sr-only"
+            />
+            <span className="block h-6 w-11 rounded-full bg-slate-300 transition peer-checked:bg-indigo-600 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500 peer-focus-visible:ring-offset-2" />
+            <span className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+          </span>
+        </label>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60 ${className}`}>
+          {children}
+        </section>
+      );
+    }
+
+    function CardHeader({ title, description, action }) {
+      return (
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div>
+            <h2 className="text-sm font-bold text-slate-800">{title}</h2>
+            {description && <p className="mt-0.5 text-xs text-slate-500">{description}</p>}
+          </div>
+          {action}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'slate', children }) {
+      const tones = {
+        slate: 'bg-slate-100 text-slate-600',
+        indigo: 'bg-indigo-50 text-indigo-700',
+        amber: 'bg-amber-50 text-amber-700',
+        rose: 'bg-rose-50 text-rose-700',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${tones[tone]}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Tabs({ tabs, value, onChange }) {
+      return (
+        <div role="tablist" aria-label="QR 데이터 유형" className="flex flex-wrap gap-1 rounded-2xl bg-slate-100 p-1.5">
+          {tabs.map((tab) => {
+            const active = tab.id === value;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => onChange(tab.id)}
+                className={`min-w-[92px] flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                  active ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <span aria-hidden="true" className="mr-1">{tab.icon}</span>
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function Toast({ toast }) {
+      if (!toast) return null;
+      const tones = {
+        success: 'bg-slate-900 text-white',
+        error: 'bg-rose-600 text-white',
+      };
+      return (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`toast fixed bottom-6 left-1/2 z-50 rounded-full px-5 py-2.5 text-sm font-semibold shadow-lg ${tones[toast.tone]}`}
+        >
+          {toast.message}
+        </div>
+      );
+    }
+
+    /** 화면 하단 알림 — 잠시 뒤 자동 소멸 */
+    function useToast() {
+      const [toast, setToast] = useState(null);
+      const timerRef = useRef(null);
+
+      const show = useCallback((message, tone = 'success') => {
+        setToast({ message, tone });
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setToast(null), 2200);
+      }, []);
+
+      useEffect(() => () => clearTimeout(timerRef.current), []);
+
+      return { toast, show };
+    }
+
+    // ========================================
+    // 🧩 Layout Components
+    // ========================================
+
+    function Header() {
+      return (
+        <header className="border-b border-slate-200 bg-white">
+          <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-5 sm:px-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-xl text-white" aria-hidden="true">
+              ▦
+            </div>
+            <div>
+              <h1 className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl">QR 코드 생성기</h1>
+              <p className="text-xs text-slate-500 sm:text-sm">링크 · 와이파이 · 연락처를 QR 코드로 만들고 PNG / SVG 로 저장하세요</p>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="mx-auto max-w-6xl px-4 pb-10 pt-2 text-center text-xs text-slate-400 sm:px-6">
+          모든 데이터는 브라우저 안에서만 처리되며 서버로 전송되지 않습니다.
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📄 Panel Components
+    // ========================================
+
+    function DataForm({ type, form, onChange }) {
+      const set = (key) => (e) => onChange({ ...form, [key]: e.target.value });
+
+      if (type === 'text') {
+        return (
+          <Textarea
+            id="f-text"
+            label="텍스트 또는 URL"
+            rows={5}
+            placeholder="https://example.com 또는 원하는 문장을 입력하세요"
+            value={form.value}
+            onChange={set('value')}
+            hint="URL 은 https:// 를 포함해야 대부분의 스캐너에서 바로 열립니다."
+          />
+        );
+      }
+
+      if (type === 'wifi') {
+        return (
+          <div className="space-y-4">
+            <Input id="f-ssid" label="네트워크 이름 (SSID)" placeholder="MyHomeWiFi" value={form.ssid} onChange={set('ssid')} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Select id="f-enc" label="보안 방식" options={ENCRYPTIONS} value={form.encryption} onChange={set('encryption')} />
+              <Input
+                id="f-pw"
+                label="비밀번호"
+                type="text"
+                placeholder={form.encryption === 'nopass' ? '개방형 네트워크' : '와이파이 비밀번호'}
+                value={form.encryption === 'nopass' ? '' : form.password}
+                onChange={set('password')}
+                disabled={form.encryption === 'nopass'}
+              />
+            </div>
+            <Switch
+              id="f-hidden"
+              label="숨겨진 네트워크 (SSID 미표시)"
+              checked={form.hidden}
+              onChange={(v) => onChange({ ...form, hidden: v })}
+            />
+          </div>
+        );
+      }
+
+      if (type === 'contact') {
+        return (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input id="f-name" label="이름" placeholder="홍길동" value={form.name} onChange={set('name')} />
+              <Input id="f-phone" label="전화번호" placeholder="010-1234-5678" value={form.phone} onChange={set('phone')} />
+              <Input id="f-org" label="회사 / 소속" placeholder="어떤회사" value={form.org} onChange={set('org')} />
+              <Input id="f-title" label="직함" placeholder="프로덕트 디자이너" value={form.title} onChange={set('title')} />
+              <Input id="f-cemail" label="이메일" type="email" placeholder="hong@example.com" value={form.email} onChange={set('email')} />
+              <Input id="f-url" label="웹사이트" placeholder="https://example.com" value={form.url} onChange={set('url')} />
+            </div>
+            <p className="text-[11px] text-slate-400">vCard 3.0 형식으로 저장되어 스캔하면 연락처 앱에 바로 추가할 수 있습니다.</p>
+          </div>
+        );
+      }
+
+      if (type === 'email') {
+        return (
+          <div className="space-y-4">
+            <Input id="f-to" label="받는 사람" type="email" placeholder="someone@example.com" value={form.to} onChange={set('to')} />
+            <Input id="f-subject" label="제목" placeholder="문의드립니다" value={form.subject} onChange={set('subject')} />
+            <Textarea id="f-body" label="본문" rows={4} placeholder="메일 내용을 입력하세요" value={form.body} onChange={set('body')} />
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-4">
+          <Input id="f-sphone" label="받는 번호" placeholder="010-1234-5678" value={form.phone} onChange={set('phone')} />
+          <Textarea id="f-msg" label="메시지" rows={4} placeholder="미리 채워둘 문자 내용" value={form.message} onChange={set('message')} />
+        </div>
+      );
+    }
+
+    function OptionsPanel({ options, onChange, lowContrast }) {
+      const set = (key, value) => onChange({ ...options, [key]: value });
+
+      return (
+        <Card>
+          <CardHeader
+            title="디자인 옵션"
+            description="크기 · 여백 · 색상 · 오류 정정 레벨"
+            action={<Button size="sm" variant="ghost" onClick={() => onChange(DEFAULT_OPTIONS)}>초기화</Button>}
+          />
+          <div className="space-y-5 px-5 py-5">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Range
+                id="o-size"
+                label="이미지 크기"
+                min={128}
+                max={1024}
+                step={32}
+                suffix="px"
+                value={options.size}
+                onChange={(e) => set('size', Number(e.target.value))}
+              />
+              <Range
+                id="o-margin"
+                label="여백 (조용한 영역)"
+                min={0}
+                max={8}
+                step={1}
+                suffix=" 모듈"
+                value={options.margin}
+                onChange={(e) => set('margin', Number(e.target.value))}
+              />
+            </div>
+
+            <Select
+              id="o-level"
+              label="오류 정정 레벨"
+              options={EC_LEVELS}
+              value={options.level}
+              onChange={(e) => set('level', e.target.value)}
+              hint="레벨이 높을수록 일부가 가려져도 인식되지만 패턴은 더 촘촘해집니다."
+            />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ColorInput id="o-dark" label="전경색 (모듈)" value={options.dark} onChange={(v) => set('dark', v)} />
+              <ColorInput id="o-light" label="배경색" value={options.light} onChange={(v) => set('light', v)} />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {COLOR_PRESETS.map((preset) => (
+                <button
+                  key={preset.name}
+                  type="button"
+                  onClick={() => onChange({ ...options, dark: preset.dark, light: preset.light })}
+                  className="flex items-center gap-2 rounded-full border border-slate-200 py-1 pl-1 pr-3 text-xs font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
+                >
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200" style={{ background: preset.light }}>
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: preset.dark }} />
+                  </span>
+                  {preset.name}
+                </button>
+              ))}
+              <Button size="sm" variant="ghost" onClick={() => onChange({ ...options, dark: options.light, light: options.dark })}>
+                ⇄ 색 뒤집기
+              </Button>
+            </div>
+
+            {lowContrast && (
+              <div className="flex items-start gap-2 break-keep rounded-xl bg-amber-50 px-3.5 py-3 text-xs leading-relaxed text-amber-800">
+                <span aria-hidden="true">⚠️</span>
+                <p>전경색과 배경색의 대비가 낮습니다. 스캐너가 인식하지 못할 수 있으니 전경색을 더 어둡게 조정해 보세요.</p>
+              </div>
+            )}
+          </div>
+        </Card>
+      );
+    }
+
+    function PreviewPanel({
+      canvasRef, content, error, dirty, renderedSize, hint,
+      onDownloadPng, onDownloadSvg, onCopyImage, onSave,
+    }) {
+      const hasContent = !!content && !error;
+
+      return (
+        <Card className="lg:sticky lg:top-6">
+          <CardHeader
+            title="미리보기"
+            action={
+              hasContent ? (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {dirty && <Badge tone="amber">수정됨</Badge>}
+                  <Badge tone="indigo">{renderedSize} × {renderedSize}</Badge>
+                </div>
+              ) : null
+            }
+          />
+
+          <div className="px-5 py-5">
+            <div className="checkerboard flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl border border-slate-200 p-4">
+              {/* canvas 는 항상 마운트 상태로 두어 ref 가 끊기지 않게 한다 */}
+              <canvas
+                ref={canvasRef}
+                role="img"
+                aria-label="생성된 QR 코드"
+                className={`h-auto max-h-full w-auto max-w-full rounded-lg shadow-sm ${hasContent ? 'block' : 'hidden'}`}
+              />
+              {!hasContent && (
+                <div className="px-6 text-center">
+                  <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-2xl shadow-sm" aria-hidden="true">
+                    {error ? '⚠️' : '▦'}
+                  </div>
+                  <p className={`break-keep text-sm font-semibold ${error ? 'text-rose-600' : 'text-slate-600'}`}>
+                    {error ? 'QR 코드를 만들 수 없어요' : '아직 만들어진 QR 코드가 없어요'}
+                  </p>
+                  <p className="mt-1 break-keep text-xs leading-relaxed text-slate-500">
+                    {error || hint}
+                    {!error && <><br />왼쪽에서 생성 버튼을 눌러 주세요.</>}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button onClick={onDownloadPng} disabled={!hasContent}>⬇ PNG 저장</Button>
+              <Button variant="secondary" onClick={onDownloadSvg} disabled={!hasContent}>⬇ SVG 저장</Button>
+              <Button variant="secondary" onClick={onCopyImage} disabled={!hasContent}>📋 이미지 복사</Button>
+              <Button variant="secondary" onClick={onSave} disabled={!hasContent}>★ 히스토리 저장</Button>
+            </div>
+
+            {dirty && (
+              <p className="mt-3 break-keep rounded-xl bg-amber-50 px-3.5 py-2.5 text-[11px] leading-relaxed text-amber-800">
+                입력 내용이 바뀌었습니다. 왼쪽의 <span className="font-semibold">↻ QR 코드 다시 생성</span> 을 눌러 반영하세요.
+              </p>
+            )}
+
+            {hasContent && (
+              <details className="mt-4 rounded-xl bg-slate-50 px-3.5 py-3">
+                <summary className="cursor-pointer text-xs font-semibold text-slate-600">
+                  인코딩된 데이터 보기 · {byteLength(content)} 바이트
+                </summary>
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-slate-600">{content}</pre>
+              </details>
+            )}
+          </div>
+        </Card>
+      );
+    }
+
+    function HistoryPanel({ items, onRestore, onRemove, onClear }) {
+      return (
+        <Card>
+          <CardHeader
+            title="히스토리"
+            description={items.length ? `저장된 QR 코드 ${items.length}개` : '저장한 QR 코드가 여기에 남습니다'}
+            action={items.length ? <Button size="sm" variant="ghost" onClick={onClear}>전체 삭제</Button> : null}
+          />
+
+          {items.length === 0 ? (
+            <p className="break-keep px-5 py-8 text-center text-xs leading-relaxed text-slate-400">
+              미리보기의 <span className="font-semibold text-slate-500">★ 히스토리 저장</span> 을 누르면<br />입력값과 디자인 설정이 함께 보관됩니다.
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {items.map((item) => {
+                const tab = TABS.find((t) => t.id === item.type);
+                return (
+                  <li key={item.id} className="flex items-center gap-3 px-5 py-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-base" aria-hidden="true">
+                      {tab ? tab.icon : '▦'}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-slate-700">{item.label}</p>
+                      <p className="text-[11px] text-slate-400">{tab ? tab.label : item.type} · {formatDate(item.createdAt)}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button size="sm" variant="secondary" onClick={() => onRestore(item)}>불러오기</Button>
+                      <Button size="sm" variant="ghost" onClick={() => onRemove(item.id)} aria-label="히스토리에서 삭제">✕</Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+
+    function App() {
+      const [tab, setTab] = useState('text');
+      const [forms, setForms] = useState(EMPTY_FORMS);
+      const [options, setOptions] = useState(DEFAULT_OPTIONS);
+      const [history, setHistory] = useState(readHistory);
+      const [submitted, setSubmitted] = useState(null);      // 생성 버튼으로 확정된 내용
+      const [renderedSize, setRenderedSize] = useState(0);
+      const [error, setError] = useState(null);
+
+      const canvasRef = useRef(null);
+      const { toast, show } = useToast();
+
+      const content = useMemo(() => buildContent(tab, forms[tab]), [tab, forms]);
+      const isDirty = !!submitted && submitted.content !== content;
+
+      const dark = safeHex(options.dark, DEFAULT_OPTIONS.dark);
+      const light = safeHex(options.light, DEFAULT_OPTIONS.light);
+      const lowContrast = useMemo(() => contrastRatio(dark, light) < 3, [dark, light]);
+
+      const qrOptions = useMemo(
+        () => ({ level: options.level, margin: options.margin, size: options.size, dark, light }),
+        [options.level, options.margin, options.size, dark, light]
+      );
+
+      // 확정된 내용 + 현재 디자인 옵션으로 캔버스를 그린다 (옵션 변경은 즉시 반영)
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!submitted || !canvas) return;
+
+        if (typeof qrcode === 'undefined') {
+          setError('QR 라이브러리를 불러오지 못했습니다. 네트워크 연결을 확인한 뒤 새로고침해 주세요.');
+          return;
+        }
+
+        try {
+          const model = createQrModel(submitted.content, qrOptions.level);
+          setRenderedSize(drawQrToCanvas(canvas, model, qrOptions));
+          setError(null);
+        } catch (err) {
+          const message = String(err && err.message ? err.message : err);
+          setError(
+            /overflow|too long|big/i.test(message)
+              ? '데이터가 너무 깁니다. 내용을 줄이거나 오류 정정 레벨을 낮춰 주세요.'
+              : `QR 생성 중 오류가 발생했습니다 — ${message}`
+          );
+        }
+      }, [submitted, qrOptions]);
+
+      useEffect(() => { writeHistory(history); }, [history]);
+
+      const handleFormChange = useCallback((next) => {
+        setForms((prev) => ({ ...prev, [tab]: next }));
+      }, [tab]);
+
+      const handleGenerate = useCallback(() => {
+        if (!content) return;
+        setSubmitted({ type: tab, content });
+        show(isDirty ? 'QR 코드를 다시 만들었습니다.' : 'QR 코드를 생성했습니다.');
+      }, [content, tab, isDirty, show]);
+
+      const handleClearInput = useCallback(() => {
+        setForms((prev) => ({ ...prev, [tab]: EMPTY_FORMS[tab] }));
+        setSubmitted(null);
+        setError(null);
+      }, [tab]);
+
+      const filenameBase = useMemo(() => `qr-${tab}-${new Date().toISOString().slice(0, 10)}`, [tab]);
+
+      const handleDownloadPng = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            show('PNG 를 만들지 못했습니다.', 'error');
+            return;
+          }
+          downloadBlob(blob, `${filenameBase}.png`);
+          show('PNG 파일을 저장했습니다.');
+        }, 'image/png');
+      }, [filenameBase, show]);
+
+      const handleDownloadSvg = useCallback(() => {
+        if (!submitted) return;
+        try {
+          const svg = buildQrSvg(createQrModel(submitted.content, qrOptions.level), qrOptions);
+          downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${filenameBase}.svg`);
+          show('SVG 파일을 저장했습니다.');
+        } catch (err) {
+          show('SVG 를 만들지 못했습니다.', 'error');
+        }
+      }, [submitted, qrOptions, filenameBase, show]);
+
+      const handleCopyImage = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !submitted) return;
+
+        // ClipboardItem 미지원 브라우저에서는 원본 데이터를 텍스트로 대신 복사
+        if (typeof ClipboardItem === 'undefined' || !navigator.clipboard || !navigator.clipboard.write) {
+          if (!navigator.clipboard) {
+            show('이 브라우저에서는 복사를 지원하지 않습니다.', 'error');
+            return;
+          }
+          navigator.clipboard.writeText(submitted.content)
+            .then(() => show('이미지 복사가 불가해 데이터를 텍스트로 복사했습니다.'))
+            .catch(() => show('복사에 실패했습니다.', 'error'));
+          return;
+        }
+
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            show('복사에 실패했습니다.', 'error');
+            return;
+          }
+          navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+            .then(() => show('QR 이미지를 클립보드에 복사했습니다.'))
+            .catch(() => show('클립보드 권한이 없어 복사하지 못했습니다.', 'error'));
+        }, 'image/png');
+      }, [submitted, show]);
+
+      const handleSave = useCallback(() => {
+        if (!submitted) return;
+        const entry = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: submitted.type,
+          label: truncate(submitted.content),
+          form: forms[submitted.type],
+          options,
+          createdAt: Date.now(),
+        };
+        setHistory((prev) => [entry, ...prev].slice(0, 20));
+        show('히스토리에 저장했습니다.');
+      }, [submitted, forms, options, show]);
+
+      const handleRestore = useCallback((item) => {
+        const type = EMPTY_FORMS[item.type] ? item.type : 'text';
+        const form = { ...EMPTY_FORMS[type], ...item.form };
+        setTab(type);
+        setForms((prev) => ({ ...prev, [type]: form }));
+        setOptions({ ...DEFAULT_OPTIONS, ...item.options });
+        setSubmitted({ type, content: buildContent(type, form) });   // 불러오면 곧바로 다시 그린다
+        show('저장된 설정을 불러왔습니다.');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, [show]);
+
+      const handleRemove = useCallback((id) => {
+        setHistory((prev) => prev.filter((item) => item.id !== id));
+      }, []);
+
+      const handleClear = useCallback(() => {
+        setHistory([]);
+        show('히스토리를 비웠습니다.');
+      }, [show]);
+
+      const historyPanel = (
+        <HistoryPanel items={history} onRestore={handleRestore} onRemove={handleRemove} onClear={handleClear} />
+      );
+
+      return (
+        <div className="min-h-screen">
+          <Header />
+
+          <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+              {/* 좌측 — 데이터 입력과 디자인 옵션 */}
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader title="내용 입력" description="만들 QR 코드의 유형을 고르고 값을 채워 주세요" />
+                  <div className="space-y-5 px-5 py-5">
+                    <Tabs tabs={TABS} value={tab} onChange={setTab} />
+                    <div role="tabpanel" aria-label={TABS.find((t) => t.id === tab).label}>
+                      <DataForm type={tab} form={forms[tab]} onChange={handleFormChange} />
+                    </div>
+
+                    <div className="space-y-2 border-t border-slate-100 pt-4">
+                      <div className="flex flex-col gap-2 sm:flex-row-reverse">
+                        <Button
+                          size="lg"
+                          className="w-full sm:flex-1"
+                          onClick={handleGenerate}
+                          disabled={!content}
+                        >
+                          {isDirty ? '↻ QR 코드 다시 생성' : '▦ QR 코드 생성'}
+                        </Button>
+                        <Button size="lg" variant="secondary" className="w-full sm:w-auto" onClick={handleClearInput}>
+                          입력 지우기
+                        </Button>
+                      </div>
+                      {!content && <p className="break-keep text-center text-[11px] text-slate-400">{EMPTY_HINTS[tab]}</p>}
+                      {isDirty && (
+                        <p className="break-keep text-center text-[11px] font-medium text-amber-600">
+                          입력이 바뀌었습니다 — 다시 생성해야 미리보기에 반영됩니다.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+
+                <OptionsPanel options={options} onChange={setOptions} lowContrast={lowContrast} />
+
+                <div className="lg:hidden">{historyPanel}</div>
+              </div>
+
+              {/* 우측 — 미리보기(스크롤 고정)와 히스토리 */}
+              <div className="space-y-6">
+                <PreviewPanel
+                  canvasRef={canvasRef}
+                  content={submitted ? submitted.content : ''}
+                  error={error}
+                  dirty={isDirty}
+                  renderedSize={renderedSize}
+                  hint={EMPTY_HINTS[tab]}
+                  onDownloadPng={handleDownloadPng}
+                  onDownloadSvg={handleDownloadSvg}
+                  onCopyImage={handleCopyImage}
+                  onSave={handleSave}
+                />
+                <div className="hidden lg:block">{historyPanel}</div>
+              </div>
+            </div>
+          </main>
+
+          <Footer />
+          <Toast toast={toast} />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

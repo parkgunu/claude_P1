@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>한국 만나이 계산기</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- CDN 버전 고정: Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-up { animation: fadeUp .35s ease-out both; }
+
+    /* 날짜 입력의 브라우저 기본 달력 아이콘 */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      cursor: pointer;
+      opacity: .55;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+  </style>
+</head>
+<body class="bg-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useCallback } = React;
+
+    // ========================================
+    // 🗓️ Date Utilities (순수 함수 / 로컬 타임존 기준)
+    // ========================================
+
+    const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    /** Date -> 'YYYY-MM-DD' (로컬 기준. toISOString 은 UTC 로 밀리므로 쓰지 않는다) */
+    function toDateInputValue(date) {
+      return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+    }
+
+    /** 'YYYY-MM-DD' -> Date. 형식이 틀리거나 실존하지 않는 날짜(2월 30일 등)면 null */
+    function parseDateInput(value) {
+      const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+      if (!matched) return null;
+
+      const year = Number(matched[1]);
+      const month = Number(matched[2]);
+      const day = Number(matched[3]);
+      const date = new Date(year, month - 1, day);
+
+      // new Date(2023, 1, 30) 은 3월 2일로 넘어가므로 되돌려 검증한다
+      const isRealDate =
+        date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day;
+
+      return isRealDate ? date : null;
+    }
+
+    /**
+     * 특정 연도의 생일 날짜.
+     * 2월 29일생은 평년에 3월 1일을 생일로 본다 (민법 해석 기준).
+     */
+    function birthdayInYear(birth, year) {
+      const month = birth.getMonth();
+      const day = birth.getDate();
+      const candidate = new Date(year, month, day);
+      if (candidate.getMonth() !== month) return new Date(year, month + 1, 1);
+      return candidate;
+    }
+
+    /** 같은 날인지 (시각 무시) */
+    function isSameDay(a, b) {
+      return a.getFullYear() === b.getFullYear()
+        && a.getMonth() === b.getMonth()
+        && a.getDate() === b.getDate();
+    }
+
+    /** 날짜 차이(일). DST 로 24시간이 아닌 날이 있어 round 로 보정 */
+    function diffInDays(from, to) {
+      return Math.round((to.getTime() - from.getTime()) / MS_PER_DAY);
+    }
+
+    /**
+     * 개월 수 더하기. 말일은 다음 달 말일로 고정한다.
+     * (1월 31일 + 1개월 은 3월 3일이 아니라 2월 28일)
+     */
+    function addMonths(date, count) {
+      const day = date.getDate();
+      const result = new Date(date.getFullYear(), date.getMonth() + count, day);
+      if (result.getDate() !== day) result.setDate(0); // 넘친 만큼 이전 달 말일로
+      return result;
+    }
+
+    function formatKoreanDate(date) {
+      return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 (${WEEKDAYS[date.getDay()]})`;
+    }
+
+    /**
+     * 만나이 계산의 핵심.
+     * 기준일이 그 해 생일 이전이면 아직 나이를 먹지 않은 것으로 본다.
+     */
+    function calculateAge(birth, base) {
+      const thisYearBirthday = birthdayInYear(birth, base.getFullYear());
+      const hasPassedBirthday = base.getTime() >= thisYearBirthday.getTime();
+
+      // 마지막으로 지나온 생일
+      const lastBirthday = hasPassedBirthday
+        ? thisYearBirthday
+        : birthdayInYear(birth, base.getFullYear() - 1);
+
+      const years = lastBirthday.getFullYear() - birth.getFullYear();
+
+      // 마지막 생일로부터 흐른 개월 / 일.
+      // 단순히 월·일을 빼면 1월 31일 -> 3월 1일 같은 경우 일수가 음수가 되므로,
+      // 한 달씩 실제로 더해 가며 기준일을 넘지 않는 마지막 지점을 찾는다.
+      let months = 0;
+      let anchor = lastBirthday;
+      while (months < 12) {
+        const stepped = addMonths(lastBirthday, months + 1);
+        if (stepped.getTime() > base.getTime()) break;
+        months += 1;
+        anchor = stepped;
+      }
+      const days = diffInDays(anchor, base);
+
+      const nextBirthday = hasPassedBirthday
+        ? birthdayInYear(birth, base.getFullYear() + 1)
+        : thisYearBirthday;
+
+      const yearAge = base.getFullYear() - birth.getFullYear(); // 연나이
+      const koreanAge = yearAge + 1;                            // 세는나이
+
+      return {
+        years,
+        months,
+        days,
+        yearAge,
+        koreanAge,
+        totalDays: diffInDays(birth, base),
+        isBirthdayToday: isSameDay(base, thisYearBirthday),
+        nextBirthday,
+        daysUntilNextBirthday: diffInDays(base, nextBirthday),
+        nextAge: years + 1,
+      };
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({ variant = 'primary', size = 'md', className = '', children, ...rest }) {
+      const base = 'inline-flex items-center justify-center gap-1.5 font-semibold rounded-xl transition-colors ' +
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 ' +
+        'disabled:opacity-50 disabled:cursor-not-allowed';
+
+      const variants = {
+        primary: 'bg-indigo-600 text-white hover:bg-indigo-700',
+        secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50',
+        ghost: 'text-slate-600 hover:bg-slate-100',
+      };
+
+      const sizes = {
+        sm: 'text-xs px-2.5 py-1.5',
+        md: 'text-sm px-4 py-2.5',
+        lg: 'text-base px-6 py-3',
+      };
+
+      return (
+        <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest}>
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ id, label, hint, error, className = '', ...rest }) {
+      return (
+        <div className={className}>
+          {label && (
+            <label htmlFor={id} className="block text-sm font-semibold text-slate-700 mb-1.5">
+              {label}
+            </label>
+          )}
+          <input
+            id={id}
+            aria-invalid={error ? 'true' : 'false'}
+            aria-describedby={error ? `${id}-error` : (hint ? `${id}-hint` : undefined)}
+            className={
+              'w-full rounded-xl border px-3.5 py-2.5 text-slate-900 bg-white transition-colors ' +
+              'focus:outline-none focus:ring-2 focus:ring-indigo-500/40 ' +
+              (error
+                ? 'border-rose-400 focus:border-rose-500'
+                : 'border-slate-300 focus:border-indigo-500')
+            }
+            {...rest}
+          />
+          {error
+            ? <p id={`${id}-error`} role="alert" className="mt-1.5 text-sm text-rose-600">{error}</p>
+            : hint && <p id={`${id}-hint`} className="mt-1.5 text-xs text-slate-500">{hint}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <div className={`bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'slate', className = '', children }) {
+      const tones = {
+        slate: 'bg-slate-100 text-slate-600',
+        indigo: 'bg-indigo-50 text-indigo-700',
+        emerald: 'bg-emerald-50 text-emerald-700',
+        amber: 'bg-amber-50 text-amber-700',
+      };
+      return (
+        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function StatCard({ label, value, unit, caption, highlight = false }) {
+      return (
+        <div
+          className={
+            'rounded-xl px-4 py-4 text-center ' +
+            (highlight
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+              : 'bg-slate-50 text-slate-900 ring-1 ring-slate-900/5')
+          }
+        >
+          <p className={`text-xs font-semibold ${highlight ? 'text-indigo-100' : 'text-slate-500'}`}>
+            {label}
+          </p>
+          <p className="mt-1.5 flex items-baseline justify-center gap-1">
+            <span className="text-3xl font-extrabold tabular-nums tracking-tight">{value}</span>
+            <span className={`text-sm font-semibold ${highlight ? 'text-indigo-100' : 'text-slate-500'}`}>
+              {unit}
+            </span>
+          </p>
+          {caption && (
+            <p className={`mt-1 text-[11px] leading-tight ${highlight ? 'text-indigo-100' : 'text-slate-400'}`}>
+              {caption}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common Components
+    // ========================================
+
+    function Header() {
+      return (
+        <header className="text-center">
+          <Badge tone="indigo">2023. 6. 28. 만 나이 통일법 시행</Badge>
+          <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
+            한국 만나이 계산기
+          </h1>
+          <p className="mt-2 text-sm sm:text-base text-slate-500">
+            생년월일을 넣으면 만나이 · 연나이 · 세는나이를 한 번에 비교해 드려요.
+          </p>
+        </header>
+      );
+    }
+
+    function EmptyState() {
+      return (
+        <Card className="p-10 text-center">
+          <div className="text-5xl" aria-hidden="true">🎂</div>
+          <p className="mt-4 text-base font-semibold text-slate-700">생년월일을 입력해 주세요</p>
+          <p className="mt-1 text-sm text-slate-500">
+            입력하는 즉시 만나이와 다음 생일까지 계산해 드립니다.
+          </p>
+        </Card>
+      );
+    }
+
+    function DetailRow({ label, value, sub }) {
+      return (
+        <div className="flex items-baseline justify-between gap-4 py-3">
+          <span className="text-sm text-slate-500 shrink-0">{label}</span>
+          <span className="text-right">
+            <span className="text-sm font-semibold text-slate-900 tabular-nums">{value}</span>
+            {sub && <span className="block text-xs text-slate-400">{sub}</span>}
+          </span>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Milestones (한국 법령상 주요 연령)
+    // ========================================
+
+    const MILESTONES = [
+      { age: 14, title: '만 14세', desc: '형사 미성년자 기준을 벗어남 · 개인정보 단독 동의' },
+      { age: 18, title: '만 18세', desc: '선거권 · 운전면허 취득 · 근로계약 체결' },
+      { age: 19, title: '만 19세', desc: '민법상 성년 (단독 계약 가능)' },
+      { age: 60, title: '만 60세', desc: '법정 정년 (60세 이상 보장)' },
+      { age: 65, title: '만 65세', desc: '기초연금 · 지하철 무임승차 등 경로우대' },
+    ];
+
+    function MilestoneList({ birth, base, age }) {
+      return (
+        <Card className="animate-fade-up p-5 sm:p-6">
+          <h2 className="text-base font-bold text-slate-900">법령상 주요 연령 도달일</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            모두 <strong className="font-semibold text-slate-600">만 나이</strong> 기준입니다.
+          </p>
+
+          <ul className="mt-4 divide-y divide-slate-100">
+            {MILESTONES.map((milestone) => {
+              const reachDate = birthdayInYear(birth, birth.getFullYear() + milestone.age);
+              const reached = base.getTime() >= reachDate.getTime();
+              const daysLeft = diffInDays(base, reachDate);
+
+              return (
+                <li key={milestone.age} className="flex items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      {milestone.title}
+                      {reached
+                        ? <Badge tone="emerald">도달</Badge>
+                        : <Badge tone="amber">D-{daysLeft.toLocaleString('ko-KR')}</Badge>}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500 truncate">{milestone.desc}</p>
+                  </div>
+                  <p className="shrink-0 text-xs font-medium text-slate-500 tabular-nums">
+                    {toDateInputValue(reachDate)}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+
+          <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500">
+            ※ 주류 · 담배 구매는 청소년보호법상 <strong className="font-semibold">연나이</strong> 기준이라
+            만 19세가 되는 해의 1월 1일부터 가능합니다.
+            {age.yearAge >= 19
+              ? ' 연나이 기준으로는 이미 해당됩니다.'
+              : ` ${birth.getFullYear() + 19}년 1월 1일부터 해당됩니다.`}
+          </p>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Component — 만나이 계산기
+    // ========================================
+
+    function AgeCalculatorPage() {
+      // 오늘(자정 기준) — 렌더마다 새 Date 를 만들지 않도록 고정
+      const today = useMemo(() => {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      }, []);
+
+      const [birthInput, setBirthInput] = useState('');
+      const [baseInput, setBaseInput] = useState(() => toDateInputValue(today));
+
+      const birthDate = useMemo(() => parseDateInput(birthInput), [birthInput]);
+      const baseDate = useMemo(() => parseDateInput(baseInput), [baseInput]);
+
+      const birthError = useMemo(() => {
+        if (!birthInput) return null;
+        if (!birthDate) return '올바른 날짜가 아닙니다. (예: 1994-03-21)';
+        if (birthDate.getFullYear() < 1900) return '1900년 이후의 날짜를 입력해 주세요.';
+        if (baseDate && birthDate.getTime() > baseDate.getTime()) {
+          return '생년월일이 기준일보다 늦습니다. 날짜를 확인해 주세요.';
+        }
+        return null;
+      }, [birthInput, birthDate, baseDate]);
+
+      const baseError = useMemo(() => {
+        if (!baseInput) return '기준일을 입력해 주세요.';
+        if (!baseDate) return '올바른 날짜가 아닙니다.';
+        return null;
+      }, [baseInput, baseDate]);
+
+      const age = useMemo(() => {
+        if (!birthDate || !baseDate || birthError || baseError) return null;
+        return calculateAge(birthDate, baseDate);
+      }, [birthDate, baseDate, birthError, baseError]);
+
+      const resetBaseToToday = useCallback(() => {
+        setBaseInput(toDateInputValue(today));
+      }, [today]);
+
+      const clearAll = useCallback(() => {
+        setBirthInput('');
+        setBaseInput(toDateInputValue(today));
+      }, [today]);
+
+      const isBaseToday = baseDate ? isSameDay(baseDate, today) : false;
+
+      return (
+        <div className="grid gap-6 lg:grid-cols-5 lg:items-start">
+
+          {/* ── 입력 영역 ── */}
+          <Card className="p-5 sm:p-6 lg:col-span-2 lg:sticky lg:top-6">
+            <h2 className="text-base font-bold text-slate-900">날짜 입력</h2>
+
+            <div className="mt-4 space-y-4">
+              <Input
+                id="birth-date"
+                label="생년월일"
+                type="date"
+                value={birthInput}
+                onChange={(e) => setBirthInput(e.target.value)}
+                min="1900-01-01"
+                max={toDateInputValue(today)}
+                error={birthError}
+                hint="달력에서 고르거나 직접 입력할 수 있어요."
+              />
+
+              <Input
+                id="base-date"
+                label="기준일"
+                type="date"
+                value={baseInput}
+                onChange={(e) => setBaseInput(e.target.value)}
+                error={baseError}
+                hint={isBaseToday
+                  ? '오늘 날짜를 기준으로 계산합니다.'
+                  : '과거 · 미래 시점의 나이도 확인할 수 있어요.'}
+              />
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button variant="secondary" size="sm" onClick={resetBaseToToday} disabled={isBaseToday}>
+                  기준일을 오늘로
+                </Button>
+                <Button variant="ghost" size="sm" onClick={clearAll}>
+                  초기화
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-xl bg-indigo-50/70 p-4">
+              <h3 className="text-xs font-bold text-indigo-900">나이 세는 방식 3가지</h3>
+              <dl className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-indigo-900/80">
+                <div>
+                  <dt className="inline font-semibold">만나이</dt>
+                  <dd className="inline"> — 생일이 지나야 한 살 증가. 법령 · 공문서 기본</dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold">연나이</dt>
+                  <dd className="inline"> — 현재 연도 − 출생 연도. 병역 · 청소년보호법 등</dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold">세는나이</dt>
+                  <dd className="inline"> — 태어나면 1살, 해가 바뀌면 +1. 일상 대화</dd>
+                </div>
+              </dl>
+            </div>
+          </Card>
+
+          {/* ── 결과 영역 ── */}
+          <div className="lg:col-span-3 space-y-6">
+            {!age ? (
+              <EmptyState />
+            ) : (
+              <React.Fragment>
+                {age.isBirthdayToday && (
+                  <div
+                    className="animate-fade-up rounded-2xl bg-gradient-to-r from-rose-500 to-orange-400 px-5 py-4 text-white shadow-md"
+                    role="status"
+                  >
+                    <p className="text-sm font-bold">🎉 생일 축하합니다!</p>
+                    <p className="text-xs text-white/90">오늘 만 {age.years}세가 되셨어요.</p>
+                  </div>
+                )}
+
+                <Card className="animate-fade-up p-6 sm:p-8">
+                  <p className="text-sm font-semibold text-slate-500">
+                    {formatKoreanDate(baseDate)} 기준
+                  </p>
+
+                  <p className="mt-2 flex items-baseline gap-2">
+                    <span className="text-lg font-bold text-slate-400">만</span>
+                    <span className="text-6xl sm:text-7xl font-extrabold tracking-tight text-indigo-600 tabular-nums">
+                      {age.years}
+                    </span>
+                    <span className="text-2xl font-bold text-slate-700">세</span>
+                  </p>
+
+                  <p className="mt-1 text-sm text-slate-500">
+                    정확히는{' '}
+                    <strong className="font-semibold text-slate-700">
+                      {age.years}년 {age.months}개월 {age.days}일
+                    </strong>
+                    을 살았어요.
+                  </p>
+
+                  <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <StatCard label="만나이" value={age.years} unit="세" caption="법령 · 공문서 기준" highlight />
+                    <StatCard label="연나이" value={age.yearAge} unit="세" caption="병역 · 청소년보호법" />
+                    <StatCard label="세는나이" value={age.koreanAge} unit="세" caption="일상 대화" />
+                  </div>
+                </Card>
+
+                <Card className="animate-fade-up p-5 sm:p-6">
+                  <h2 className="text-base font-bold text-slate-900">자세히 보기</h2>
+                  <div className="mt-2 divide-y divide-slate-100">
+                    <DetailRow
+                      label="태어난 날"
+                      value={formatKoreanDate(birthDate)}
+                      sub={`${WEEKDAYS[birthDate.getDay()]}요일에 태어났어요`}
+                    />
+                    <DetailRow
+                      label="살아온 날"
+                      value={`${age.totalDays.toLocaleString('ko-KR')}일`}
+                      sub={`약 ${Math.floor(age.totalDays / 7).toLocaleString('ko-KR')}주`}
+                    />
+                    <DetailRow
+                      label="다음 생일"
+                      value={age.daysUntilNextBirthday === 0
+                        ? '오늘! 🎂'
+                        : `D-${age.daysUntilNextBirthday.toLocaleString('ko-KR')}`}
+                      sub={`${formatKoreanDate(age.nextBirthday)} · 만 ${age.nextAge}세`}
+                    />
+                    <DetailRow
+                      label="1,000일 단위"
+                      value={`${(Math.floor(age.totalDays / 1000) * 1000).toLocaleString('ko-KR')}일 지남`}
+                      sub={`다음 ${((Math.floor(age.totalDays / 1000) + 1) * 1000).toLocaleString('ko-KR')}일까지 ${(1000 - (age.totalDays % 1000)).toLocaleString('ko-KR')}일`}
+                    />
+                  </div>
+                </Card>
+
+                <MilestoneList birth={birthDate} base={baseDate} age={age} />
+              </React.Fragment>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+
+    function App() {
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-slate-100">
+          <div className="mx-auto max-w-5xl px-4 py-10 sm:py-14">
+            <Header />
+            <main className="mt-8">
+              <AgeCalculatorPage />
+            </main>
+            <footer className="mt-10 text-center text-[11px] leading-relaxed text-slate-400">
+              <p>2월 29일생은 평년의 경우 3월 1일을 생일로 계산합니다 (민법 해석 기준).</p>
+              <p className="mt-1">계산 결과는 참고용이며, 법적 효력이 필요하면 관계 기관에 확인하세요.</p>
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
