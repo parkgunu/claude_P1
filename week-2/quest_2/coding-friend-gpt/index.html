@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>코딩친구 GPT</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현 불가한 것만 */
+    html, body, #root { height: 100%; }
+    body { background: #212121; }
+
+    .thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .thin-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 8px; }
+    .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    .caret { display: inline-block; width: 8px; height: 1em; vertical-align: -2px;
+             background: #10a37f; border-radius: 2px; animation: blink 1s steps(1) infinite; }
+
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .22s ease-out both; }
+
+    /* 마크다운 본문 스타일 (Tailwind typography 플러그인 없이 직접) */
+    .md { line-height: 1.75; word-break: break-word; }
+    .md > *:first-child { margin-top: 0; }
+    .md > *:last-child { margin-bottom: 0; }
+    .md p { margin: .6rem 0; }
+    .md h1, .md h2, .md h3 { font-weight: 700; line-height: 1.35; margin: 1.2rem 0 .6rem; }
+    .md h1 { font-size: 1.35rem; } .md h2 { font-size: 1.18rem; } .md h3 { font-size: 1.05rem; }
+    .md ul, .md ol { margin: .6rem 0; padding-left: 1.35rem; }
+    .md ul { list-style: disc; } .md ol { list-style: decimal; }
+    .md li { margin: .25rem 0; }
+    .md a { color: #6ab7ff; text-decoration: underline; text-underline-offset: 2px; }
+    .md blockquote { border-left: 3px solid rgba(255,255,255,.2); padding-left: .85rem; margin: .7rem 0; color: #c7c7c7; }
+    .md hr { border: 0; border-top: 1px solid rgba(255,255,255,.12); margin: 1rem 0; }
+    .md table { width: 100%; border-collapse: collapse; margin: .8rem 0; font-size: .9rem; display: block; overflow-x: auto; }
+    .md th, .md td { border: 1px solid rgba(255,255,255,.14); padding: .45rem .6rem; text-align: left; }
+    .md th { background: rgba(255,255,255,.06); }
+    .md code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .875em;
+               background: rgba(255,255,255,.1); padding: .12em .38em; border-radius: 5px; }
+    .md pre { position: relative; background: #0d1117; border: 1px solid rgba(255,255,255,.1);
+              border-radius: 12px; padding: 2.4rem .9rem .9rem; overflow-x: auto; margin: .8rem 0; }
+    .md pre code { background: transparent; padding: 0; font-size: .84rem; line-height: 1.6; color: #e6edf3; }
+  </style>
+</head>
+<body class="bg-[#212121] text-gray-100 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } = React;
+
+    // ========================================
+    // ⚙️ Constants & Persona
+    // ========================================
+
+    /* 키는 커밋하지 않는다. 앱 실행 후 좌측 하단 [설정]에서 입력하면 브라우저 localStorage 에 저장된다. */
+    const DEFAULT_API_KEY = '';
+
+    const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+
+    const STORAGE = {
+      chats: 'coding-friend-gpt:chats',
+      settings: 'coding-friend-gpt:settings',
+    };
+
+    const MODELS = [
+      { value: 'gpt-4o-mini', label: 'gpt-4o-mini · 빠르고 저렴' },
+      { value: 'gpt-4o',      label: 'gpt-4o · 똑똑함' },
+      { value: 'gpt-4.1-mini',label: 'gpt-4.1-mini · 균형형' },
+      { value: 'gpt-4.1',     label: 'gpt-4.1 · 코딩 강함' },
+    ];
+
+    // temperature 를 받지 않는 계열(추론 모델 등)은 파라미터에서 제외한다
+    const NO_TEMPERATURE = /^(o1|o3|o4|gpt-5)/i;
+
+    const SYSTEM_PROMPT = `너는 "코딩친구 GPT"야. 웹/앱 개발이 전문인, 옆자리에 앉은 5년차 개발자 친구.
+
+[말투]
+- 무조건 반말. 존댓말 금지. "~야", "~해봐", "~거든?", "~인 거지" 같은 친구 톤.
+- 센스 있고 재밌게. 적당한 드립과 비유는 환영, 근데 개그가 설명을 잡아먹으면 안 돼.
+- 이모지는 문단당 최대 1개 정도만. 남발하면 촌스러워.
+- 사족 인사말("무엇을 도와드릴까요") 금지. 바로 본론으로 들어가.
+
+[전문 분야]
+- 프론트엔드: HTML/CSS, Tailwind, JavaScript/TypeScript, React, Next.js, Vue, 상태관리, 성능 최적화, 접근성
+- 백엔드: Node.js/Express, REST/GraphQL, 인증(JWT/OAuth), DB 설계(SQL/NoSQL), 캐싱
+- 앱: React Native, Flutter, 앱스토어 배포 흐름, 웹뷰 하이브리드
+- 그 외: Git, CI/CD, Vercel/Netlify 배포, 디버깅, 코드리뷰, 아키텍처 선택
+
+[답변 규칙]
+1. 결론부터 한 줄. 그다음 이유와 디테일.
+2. 코드는 항상 복붙해서 바로 돌아가는 완성형으로. 언어 표시된 코드블록(\`\`\`js 등) 필수.
+3. 코드 다음엔 "왜 이렇게 했는지" 핵심만 2~3줄 짚어줘.
+4. 선택지가 갈리면 트레이드오프를 짧게 비교하고, 네 추천을 확실히 하나 골라줘. 애매하게 끝내지 마.
+5. 초보가 밟을 만한 함정이 보이면 미리 경고해줘. ("이거 이렇게 하면 나중에 CORS로 울어")
+6. 모르면 모른다고 해. 지어내지 말고, 최신 버전 이슈 같은 건 "공식문서 확인해봐"라고 솔직하게.
+7. 질문이 너무 두루뭉술하면, 일단 가장 그럴듯한 가정으로 답을 주고 마지막에 확인 질문 하나 붙여.
+8. 길이는 질문에 맞춰. 간단한 질문에 장문 에세이 쓰지 마.
+9. 답변은 한국어. 기술 용어는 원어 그대로 써도 돼.`;
+
+    const SUGGESTIONS = [
+      { icon: '⚛️', title: 'useEffect 무한루프', text: 'React에서 useEffect가 무한루프 도는데 원인이랑 해결법 알려줘' },
+      { icon: '🎨', title: 'Tailwind 반응형', text: 'Tailwind로 모바일에선 1단, 데스크톱에선 3단 카드 그리드 만드는 법 알려줘' },
+      { icon: '🔐', title: 'JWT 로그인 설계', text: 'Node.js + Express로 JWT 로그인 만들 건데, 토큰 저장 위치랑 리프레시 전략 어떻게 가는 게 좋아?' },
+      { icon: '📱', title: '앱 스택 고르기', text: '개인 프로젝트로 모바일 앱 만들려는데 React Native랑 Flutter 중에 뭐가 나아?' },
+    ];
+
+    const DEFAULT_SETTINGS = {
+      apiKey: DEFAULT_API_KEY,
+      model: 'gpt-4o-mini',
+      temperature: 0.9,
+      systemPrompt: SYSTEM_PROMPT,
+    };
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+    const cls = (...xs) => xs.filter(Boolean).join(' ');
+
+    function loadJSON(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    function saveJSON(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* 용량 초과 등 무시 */ }
+    }
+
+    const maskKey = (k) => (!k ? '' : k.length < 14 ? '••••' : k.slice(0, 7) + '••••••••' + k.slice(-4));
+
+    function titleFrom(text) {
+      const t = (text || '').replace(/\s+/g, ' ').trim();
+      return t.length > 26 ? t.slice(0, 26) + '…' : (t || '새 대화');
+    }
+
+    function renderMarkdown(text) {
+      const raw = marked.parse(text || '', { breaks: true, gfm: true });
+      return DOMPurify.sanitize(raw, { ADD_ATTR: ['target'] });
+    }
+
+    /** OpenAI Chat Completions 스트리밍 (SSE 파싱) */
+    async function streamChat({ apiKey, model, temperature, messages, signal, onDelta }) {
+      const body = { model, messages, stream: true };
+      if (!NO_TEMPERATURE.test(model)) body.temperature = temperature;
+
+      const res = await fetch(OPENAI_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+        signal,
+      });
+
+      if (!res.ok) {
+        let detail = '';
+        try {
+          const j = await res.json();
+          detail = j?.error?.message || '';
+        } catch (e) { detail = await res.text().catch(() => ''); }
+        throw new Error(`[${res.status}] ${detail || '요청이 거절됐어'}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const payload = trimmed.slice(5).trim();
+          if (payload === '[DONE]') return;
+          try {
+            const json = JSON.parse(payload);
+            const delta = json?.choices?.[0]?.delta?.content;
+            if (delta) onDelta(delta);
+          } catch (e) { /* 잘린 청크는 무시 */ }
+        }
+      }
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({ variant = 'primary', size = 'md', className = '', disabled, children, ...rest }) {
+      const base = 'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 disabled:opacity-40 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-emerald-600 hover:bg-emerald-500 text-white',
+        secondary: 'bg-white/10 hover:bg-white/15 text-gray-100',
+        danger: 'bg-red-600/90 hover:bg-red-500 text-white',
+        ghost: 'bg-transparent hover:bg-white/10 text-gray-300',
+      };
+      const sizes = { sm: 'text-xs px-2.5 py-1.5', md: 'text-sm px-3.5 py-2', lg: 'text-base px-5 py-2.5' };
+      return (
+        <button className={cls(base, variants[variant], sizes[size], className)} disabled={disabled} {...rest}>
+          {children}
+        </button>
+      );
+    }
+
+    function IconButton({ label, className = '', children, ...rest }) {
+      return (
+        <button
+          aria-label={label}
+          title={label}
+          className={cls('inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-300 hover:bg-white/10 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60', className)}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ label, error, className = '', ...rest }) {
+      return (
+        <label className="block">
+          {label && <span className="mb-1.5 block text-sm font-medium text-gray-300">{label}</span>}
+          <input
+            className={cls(
+              'w-full rounded-xl bg-[#2f2f2f] border px-3.5 py-2.5 text-sm text-gray-100 placeholder-gray-500 outline-none transition-colors',
+              error ? 'border-red-500/70 focus:border-red-400' : 'border-white/10 focus:border-emerald-500/70',
+              className
+            )}
+            {...rest}
+          />
+          {error && <span className="mt-1 block text-xs text-red-400">{error}</span>}
+        </label>
+      );
+    }
+
+    function Select({ label, className = '', children, ...rest }) {
+      return (
+        <label className="block">
+          {label && <span className="mb-1.5 block text-sm font-medium text-gray-300">{label}</span>}
+          <select
+            className={cls('w-full rounded-xl bg-[#2f2f2f] border border-white/10 px-3.5 py-2.5 text-sm text-gray-100 outline-none focus:border-emerald-500/70', className)}
+            {...rest}
+          >
+            {children}
+          </select>
+        </label>
+      );
+    }
+
+    function TextArea({ label, hint, className = '', ...rest }) {
+      return (
+        <label className="block">
+          {label && <span className="mb-1.5 block text-sm font-medium text-gray-300">{label}</span>}
+          <textarea
+            className={cls('w-full rounded-xl bg-[#2f2f2f] border border-white/10 px-3.5 py-2.5 text-sm leading-relaxed text-gray-100 placeholder-gray-500 outline-none focus:border-emerald-500/70 thin-scroll', className)}
+            {...rest}
+          />
+          {hint && <span className="mt-1 block text-xs text-gray-500">{hint}</span>}
+        </label>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+          <div className={cls('relative w-full rounded-2xl border border-white/10 bg-[#2a2a2a] shadow-2xl fade-up', widths[size])}>
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <h2 className="text-base font-semibold text-white">{title}</h2>
+              <IconButton label="닫기" onClick={onClose}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </IconButton>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-5 py-4 thin-scroll">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Badge({ children, className = '' }) {
+      return (
+        <span className={cls('inline-flex items-center rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-gray-300', className)}>
+          {children}
+        </span>
+      );
+    }
+
+    function Avatar({ role }) {
+      const isUser = role === 'user';
+      return (
+        <div
+          className={cls(
+            'flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full text-sm',
+            isUser ? 'bg-indigo-500/90 text-white' : 'bg-emerald-600 text-white'
+          )}
+          aria-hidden="true"
+        >
+          {isUser ? '나' : '🤖'}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📝 Markdown Renderer (+ 코드블록 복사 버튼)
+    // ========================================
+
+    function Markdown({ text }) {
+      const ref = useRef(null);
+      const html = useMemo(() => renderMarkdown(text), [text]);
+
+      useEffect(() => {
+        const root = ref.current;
+        if (!root) return;
+        root.querySelectorAll('pre').forEach((pre) => {
+          if (pre.dataset.enhanced === '1') return;
+          pre.dataset.enhanced = '1';
+          const code = pre.innerText;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = '복사';
+          btn.className = 'absolute top-2 right-2 rounded-md bg-white/10 px-2 py-1 text-[11px] text-gray-300 hover:bg-white/20 hover:text-white transition-colors';
+          btn.addEventListener('click', () => {
+            navigator.clipboard.writeText(code).then(() => {
+              btn.textContent = '복사됨!';
+              setTimeout(() => { btn.textContent = '복사'; }, 1200);
+            });
+          });
+          pre.appendChild(btn);
+        });
+        root.querySelectorAll('a').forEach((a) => {
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+        });
+      }, [html]);
+
+      return <div ref={ref} className="md text-[15px] text-gray-100" dangerouslySetInnerHTML={{ __html: html }} />;
+    }
+
+    // ========================================
+    // 🧩 Layout Components
+    // ========================================
+
+    function ConversationItem({ chat, active, onSelect, onDelete }) {
+      return (
+        <div
+          className={cls(
+            'group flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors cursor-pointer',
+            active ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'
+          )}
+          onClick={() => onSelect(chat.id)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter') onSelect(chat.id); }}
+        >
+          <span className="flex-1 truncate">{chat.title}</span>
+          <button
+            aria-label="대화 삭제"
+            title="삭제"
+            className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 transition"
+            onClick={(e) => { e.stopPropagation(); onDelete(chat.id); }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </div>
+      );
+    }
+
+    function Sidebar({ open, chats, activeId, onNew, onSelect, onDelete, onOpenSettings, onClose, model }) {
+      return (
+        <React.Fragment>
+          <div
+            className={cls('fixed inset-0 z-30 bg-black/50 md:hidden transition-opacity', open ? 'opacity-100' : 'pointer-events-none opacity-0')}
+            onClick={onClose}
+          />
+          <aside
+            className={cls(
+              'fixed z-40 flex h-full w-[264px] flex-col border-r border-white/10 bg-[#171717] transition-transform duration-200 md:static md:translate-x-0',
+              open ? 'translate-x-0' : '-translate-x-full'
+            )}
+          >
+            <div className="flex items-center gap-2 px-3 py-3">
+              <Button variant="secondary" className="flex-1 justify-start" onClick={onNew}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                새 대화
+              </Button>
+              <IconButton label="사이드바 닫기" className="md:hidden" onClick={onClose}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </IconButton>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-2 pb-2 thin-scroll">
+              <p className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-600">대화 기록</p>
+              {chats.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-gray-600">아직 대화가 없어.<br />첫 질문을 던져봐 👀</p>
+              ) : (
+                <div className="space-y-0.5">
+                  {chats.map((c) => (
+                    <ConversationItem key={c.id} chat={c} active={c.id === activeId} onSelect={onSelect} onDelete={onDelete} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-white/10 p-2">
+              <button
+                onClick={onOpenSettings}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-gray-300 hover:bg-white/5"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.35.4.64.73.82" />
+                </svg>
+                <span className="flex-1">설정</span>
+                <Badge>{model}</Badge>
+              </button>
+            </div>
+          </aside>
+        </React.Fragment>
+      );
+    }
+
+    function Header({ onToggleSidebar, title, model }) {
+      return (
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/10 px-3">
+          <IconButton label="사이드바 열기" className="md:hidden" onClick={onToggleSidebar}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M3 6h18M3 12h18M3 18h18" />
+            </svg>
+          </IconButton>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-sm font-semibold text-gray-100">{title}</h1>
+          </div>
+          <Badge className="hidden sm:inline-flex">{model}</Badge>
+        </header>
+      );
+    }
+
+    // ========================================
+    // 💬 Chat Components
+    // ========================================
+
+    function MessageBubble({ message, streaming }) {
+      const isUser = message.role === 'user';
+      return (
+        <div className="fade-up flex gap-3 px-4 py-4 sm:px-6">
+          <Avatar role={message.role} />
+          <div className="min-w-0 flex-1">
+            <p className="mb-1 text-xs font-semibold text-gray-400">{isUser ? '나' : '코딩친구'}</p>
+            {message.error ? (
+              <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">
+                <strong className="font-semibold">앗, 터졌다.</strong> {message.content}
+              </div>
+            ) : isUser ? (
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-gray-100">{message.content}</p>
+            ) : (
+              <React.Fragment>
+                <Markdown text={message.content} />
+                {streaming && !message.content && <span className="caret" aria-label="응답 생성 중" />}
+              </React.Fragment>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function EmptyState({ onPick }) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center px-4 py-10">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl">🤖</div>
+          <h2 className="text-xl font-bold text-white sm:text-2xl">뭐 만들다 막혔어?</h2>
+          <p className="mt-2 max-w-md text-center text-sm text-gray-400">
+            웹·앱 개발 전문 코딩 친구야. 편하게 반말로 물어봐 — 에러 로그 통째로 던져도 되고.
+          </p>
+
+          <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s.title}
+                onClick={() => onPick(s.text)}
+                className="rounded-2xl border border-white/10 bg-white/[.03] p-4 text-left transition-colors hover:border-white/20 hover:bg-white/[.07]"
+              >
+                <span className="text-lg">{s.icon}</span>
+                <p className="mt-1.5 text-sm font-semibold text-gray-100">{s.title}</p>
+                <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-gray-500">{s.text}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function Composer({ onSend, onStop, loading, disabled }) {
+      const [value, setValue] = useState('');
+      const taRef = useRef(null);
+
+      useEffect(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+      }, [value]);
+
+      const submit = () => {
+        const text = value.trim();
+        if (!text || loading || disabled) return;
+        setValue('');
+        onSend(text);
+      };
+
+      const onKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          submit();
+        }
+      };
+
+      return (
+        <div className="shrink-0 px-3 pb-4 sm:px-6">
+          <div className="mx-auto max-w-3xl">
+            <div className="flex items-end gap-2 rounded-3xl border border-white/10 bg-[#2f2f2f] p-2 pl-4 focus-within:border-white/25">
+              <textarea
+                ref={taRef}
+                rows={1}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder={disabled ? 'API 키부터 설정에서 넣어줘' : '메시지를 입력해봐 (Shift + Enter 로 줄바꿈)'}
+                aria-label="메시지 입력"
+                disabled={disabled}
+                className="thin-scroll max-h-[200px] flex-1 resize-none bg-transparent py-2.5 text-[15px] leading-relaxed text-gray-100 placeholder-gray-500 outline-none disabled:cursor-not-allowed"
+              />
+              {loading ? (
+                <IconButton label="생성 중지" className="bg-white/10 hover:bg-white/20" onClick={onStop}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                </IconButton>
+              ) : (
+                <IconButton
+                  label="보내기"
+                  className="bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-30"
+                  onClick={submit}
+                  disabled={!value.trim() || disabled}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </IconButton>
+              )}
+            </div>
+            <p className="mt-2 text-center text-[11px] text-gray-600">
+              코딩친구도 가끔 헛소리해. 중요한 건 공식문서로 한 번 더 확인하자.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // ⚙️ Settings Modal
+    // ========================================
+
+    function SettingsModal({ isOpen, onClose, settings, onSave, onClearAll }) {
+      const [draft, setDraft] = useState(settings);
+      const [showKey, setShowKey] = useState(false);
+
+      useEffect(() => { if (isOpen) { setDraft(settings); setShowKey(false); } }, [isOpen, settings]);
+
+      const update = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="설정" size="lg">
+          <div className="space-y-5">
+            <div>
+              <Input
+                label="OpenAI API Key"
+                type={showKey ? 'text' : 'password'}
+                value={draft.apiKey}
+                onChange={(e) => update({ apiKey: e.target.value })}
+                placeholder="sk-..."
+                spellCheck="false"
+              />
+              <div className="mt-2 flex items-center justify-between">
+                <span className="font-mono text-[11px] text-gray-500">{maskKey(draft.apiKey)}</span>
+                <Button size="sm" variant="ghost" onClick={() => setShowKey((v) => !v)}>
+                  {showKey ? '가리기' : '보기'}
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-amber-400/80">
+                ⚠️ 키가 브라우저에 그대로 노출돼. 이 파일은 공개 저장소에 올리지 말고, 유출되면 바로 재발급해.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select label="모델" value={draft.model} onChange={(e) => update({ model: e.target.value })}>
+                {MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </Select>
+              <div>
+                <span className="mb-1.5 block text-sm font-medium text-gray-300">
+                  창의성 (temperature): <span className="text-emerald-400">{draft.temperature.toFixed(1)}</span>
+                </span>
+                <input
+                  type="range" min="0" max="2" step="0.1"
+                  value={draft.temperature}
+                  onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
+                  className="w-full accent-emerald-500"
+                  aria-label="temperature"
+                />
+                <div className="flex justify-between text-[11px] text-gray-600"><span>진지함</span><span>드립력</span></div>
+              </div>
+            </div>
+
+            <TextArea
+              label="페르소나 (시스템 프롬프트)"
+              rows={10}
+              value={draft.systemPrompt}
+              onChange={(e) => update({ systemPrompt: e.target.value })}
+              hint="말투나 전문 분야를 바꾸고 싶으면 여기를 고치면 돼."
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4">
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => update({ systemPrompt: SYSTEM_PROMPT })}>페르소나 초기화</Button>
+                <Button variant="danger" size="sm" onClick={onClearAll}>대화 전체 삭제</Button>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={onClose}>취소</Button>
+                <Button onClick={() => { onSave(draft); onClose(); }}>저장</Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📄 Chat Page
+    // ========================================
+
+    function ChatView({ chat, loading, streamingId, onSend, onStop, disabled }) {
+      const scrollRef = useRef(null);
+      const stickRef = useRef(true);
+      const messages = chat ? chat.messages : [];
+
+      const onScroll = () => {
+        const el = scrollRef.current;
+        if (!el) return;
+        stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      };
+
+      useEffect(() => {
+        const el = scrollRef.current;
+        if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+      });
+
+      return (
+        <React.Fragment>
+          <div ref={scrollRef} onScroll={onScroll} className="thin-scroll flex-1 overflow-y-auto">
+            {messages.length === 0 ? (
+              <EmptyState onPick={onSend} />
+            ) : (
+              <div className="mx-auto max-w-3xl pb-6">
+                {messages.map((m) => (
+                  <MessageBubble key={m.id} message={m} streaming={loading && m.id === streamingId} />
+                ))}
+              </div>
+            )}
+          </div>
+          <Composer onSend={onSend} onStop={onStop} loading={loading} disabled={disabled} />
+        </React.Fragment>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+
+    function App() {
+      const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...loadJSON(STORAGE.settings, {}) }));
+      const [chats, setChats] = useState(() => loadJSON(STORAGE.chats, []));
+      const [activeId, setActiveId] = useState(() => (loadJSON(STORAGE.chats, [])[0]?.id ?? null));
+      const [sidebarOpen, setSidebarOpen] = useState(false);
+      const [settingsOpen, setSettingsOpen] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [streamingId, setStreamingId] = useState(null);
+      const abortRef = useRef(null);
+
+      useEffect(() => { saveJSON(STORAGE.chats, chats); }, [chats]);
+      useEffect(() => { saveJSON(STORAGE.settings, settings); }, [settings]);
+
+      const activeChat = useMemo(() => chats.find((c) => c.id === activeId) ?? null, [chats, activeId]);
+
+      const patchChat = useCallback((id, updater) => {
+        setChats((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
+      }, []);
+
+      const newChat = useCallback(() => {
+        if (loading) return;
+        setActiveId(null);
+        setSidebarOpen(false);
+      }, [loading]);
+
+      const selectChat = useCallback((id) => {
+        if (loading) return;
+        setActiveId(id);
+        setSidebarOpen(false);
+      }, [loading]);
+
+      const deleteChat = useCallback((id) => {
+        const next = chats.filter((c) => c.id !== id);
+        setChats(next);
+        setActiveId((cur) => (cur === id ? (next[0] ? next[0].id : null) : cur));
+      }, [chats]);
+
+      const clearAll = useCallback(() => {
+        if (!window.confirm('대화 기록을 전부 지울까? 되돌릴 수 없어.')) return;
+        setChats([]);
+        setActiveId(null);
+        setSettingsOpen(false);
+      }, []);
+
+      const stop = useCallback(() => {
+        if (abortRef.current) abortRef.current.abort();
+      }, []);
+
+      const send = useCallback(async (text) => {
+        if (loading || !settings.apiKey) return;
+
+        const userMsg = { id: uid(), role: 'user', content: text };
+        const botMsg = { id: uid(), role: 'assistant', content: '' };
+
+        // 새 대화면 만들고, 아니면 기존 대화에 붙인다
+        let chatId = activeId;
+        let history = [];
+
+        if (!chatId) {
+          chatId = uid();
+          const created = { id: chatId, title: titleFrom(text), createdAt: Date.now(), messages: [userMsg, botMsg] };
+          setChats((prev) => [created, ...prev]);
+          setActiveId(chatId);
+        } else {
+          const current = chats.find((c) => c.id === chatId);
+          history = current ? current.messages.filter((m) => !m.error) : [];
+          patchChat(chatId, (c) => ({
+            ...c,
+            title: c.messages.length === 0 ? titleFrom(text) : c.title,
+            messages: [...c.messages, userMsg, botMsg],
+          }));
+        }
+
+        const payload = [
+          { role: 'system', content: settings.systemPrompt },
+          ...history.map((m) => ({ role: m.role, content: m.content })),
+          { role: 'user', content: text },
+        ];
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+        setLoading(true);
+        setStreamingId(botMsg.id);
+
+        const appendDelta = (delta) => {
+          patchChat(chatId, (c) => ({
+            ...c,
+            messages: c.messages.map((m) => (m.id === botMsg.id ? { ...m, content: m.content + delta } : m)),
+          }));
+        };
+
+        try {
+          await streamChat({
+            apiKey: settings.apiKey,
+            model: settings.model,
+            temperature: settings.temperature,
+            messages: payload,
+            signal: controller.signal,
+            onDelta: appendDelta,
+          });
+        } catch (err) {
+          const aborted = err.name === 'AbortError';
+          patchChat(chatId, (c) => ({
+            ...c,
+            messages: c.messages.map((m) => {
+              if (m.id !== botMsg.id) return m;
+              if (aborted) return m.content ? m : { ...m, content: '_(중단했어)_' };
+              return { ...m, error: true, content: err.message || '네트워크가 말썽이야. 잠깐 뒤에 다시 시도해봐.' };
+            }),
+          }));
+        } finally {
+          abortRef.current = null;
+          setLoading(false);
+          setStreamingId(null);
+        }
+      }, [loading, settings, activeId, chats, patchChat]);
+
+      // 언마운트 시 진행 중인 스트림 정리
+      useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
+
+      return (
+        <div className="flex h-full">
+          <Sidebar
+            open={sidebarOpen}
+            chats={chats}
+            activeId={activeId}
+            model={settings.model}
+            onNew={newChat}
+            onSelect={selectChat}
+            onDelete={deleteChat}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onClose={() => setSidebarOpen(false)}
+          />
+
+          <main className="flex min-w-0 flex-1 flex-col">
+            <Header
+              onToggleSidebar={() => setSidebarOpen(true)}
+              title={activeChat ? activeChat.title : '코딩친구 GPT'}
+              model={settings.model}
+            />
+            {!settings.apiKey && (
+              <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-300">
+                API 키가 비어 있어. 왼쪽 아래 <strong>설정</strong>에서 넣어줘.
+              </div>
+            )}
+            <ChatView
+              chat={activeChat}
+              loading={loading}
+              streamingId={streamingId}
+              onSend={send}
+              onStop={stop}
+              disabled={!settings.apiKey}
+            />
+          </main>
+
+          <SettingsModal
+            isOpen={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            settings={settings}
+            onSave={setSettings}
+            onClearAll={clearAll}
+          />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

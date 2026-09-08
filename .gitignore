@@ -8,3 +8,9 @@ __pycache__/
 
 # Gemini(Nano Banana) API key 가 들어있음 - 절대 커밋 금지
 .claude/settings.local.json
+
+# Playwright MCP 세션 로그/임시 산출물
+.playwright-mcp/
+
+# 루트에 생긴 브라우저 실습 스크린샷 (퀘스트 폴더 안 이미지는 커밋 대상)
+/*.png

@@ -1,0 +1,17 @@
+{
+  "name": "maeum-shwimpyo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "마음쉼표 — 심리상담 챗봇 (OpenAI 프록시 서버 포함)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

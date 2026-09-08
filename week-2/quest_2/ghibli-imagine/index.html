@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ghibli Imagine — 지브리 스타일 이미지 생성기</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN 버전 고정. Babel 은 반드시 7.x -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    body { background-color: #0f1115; }
+    /* Tailwind 유틸리티로 표현 불가한 애니메이션만 정의 */
+    @keyframes shimmer {
+      0%   { background-position: -700px 0; }
+      100% { background-position:  700px 0; }
+    }
+    .shimmer {
+      background-image: linear-gradient(90deg, #1a1d24 0%, #262b35 45%, #1a1d24 90%);
+      background-size: 700px 100%;
+      animation: shimmer 1.6s linear infinite;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp .45s ease-out both; }
+    @keyframes floaty {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-6px); }
+    }
+    .floaty { animation: floaty 4s ease-in-out infinite; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: #0f1115; }
+    ::-webkit-scrollbar-thumb { background: #2b313d; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a424f; }
+  </style>
+</head>
+<body class="bg-[#0f1115] text-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+    // ========================================
+    // ⚙️ Constants & Config
+    // ========================================
+
+    /** 모든 프롬프트에 강제로 붙는 지브리 스타일 지문 (사용자가 끌 수 없음) */
+    const GHIBLI_STYLE =
+      'Studio Ghibli anime style, hand-painted cel animation, Hayao Miyazaki film still, ' +
+      'soft watercolor gouache background, lush painterly detail, warm cinematic natural lighting, ' +
+      'gentle pastel color palette, fluffy volumetric clouds, whimsical and nostalgic atmosphere, ' +
+      'clean line art, 2D animation, high quality';
+
+    const RATIOS = [
+      { id: '1:1',  label: '1:1',  sub: '정사각', w: 1024, h: 1024, box: 'aspect-square' },
+      { id: '16:9', label: '16:9', sub: '와이드', w: 1344, h: 768,  box: 'aspect-video' },
+      { id: '9:16', label: '9:16', sub: '세로',   w: 768,  h: 1344, box: 'aspect-[9/16]' },
+      { id: '4:3',  label: '4:3',  sub: '클래식', w: 1152, h: 896,  box: 'aspect-[4/3]' },
+      { id: '3:4',  label: '3:4',  sub: '포스터', w: 896,  h: 1152, box: 'aspect-[3/4]' },
+    ];
+
+    /** 지브리 결을 유지한 채 분위기만 얹는 프리셋 */
+    const MOODS = [
+      { id: 'none',    label: '기본',       emoji: '🎨', extra: '' },
+      { id: 'summer',  label: '여름 시골',  emoji: '🌾', extra: 'summer countryside, green rice fields, cicada afternoon, bright blue sky, cumulus clouds' },
+      { id: 'sky',     label: '하늘 비행',  emoji: '☁️', extra: 'floating islands, airship, endless sky, sense of flight, sunlit clouds' },
+      { id: 'rain',    label: '비 오는 날', emoji: '🌧️', extra: 'rainy town, wet reflective pavement, umbrellas, moody overcast light, puddles' },
+      { id: 'forest',  label: '마법의 숲',  emoji: '🌳', extra: 'ancient spirit forest, mossy trees, glowing lanterns, forest spirits, dappled sunlight' },
+      { id: 'sunset',  label: '노을 바다',  emoji: '🌅', extra: 'seaside town at sunset, golden hour, calm ocean, small ferry, warm orange sky' },
+      { id: 'winter',  label: '겨울 마을',  emoji: '❄️', extra: 'snowy village at dusk, warm glowing windows, falling snow, cozy quiet street' },
+      { id: 'night',   label: '별밤',       emoji: '🌌', extra: 'starry night sky, milky way, quiet hilltop, moonlight, deep blue tones' },
+    ];
+
+    const EXAMPLE_PROMPTS = [
+      '빨간 우산을 쓴 소녀가 시골 버스 정류장에서 비를 피하고 있다',
+      '고양이가 창가에 앉아 노을 지는 항구를 바라본다',
+      '언덕 위 작은 빵집, 자전거를 세워둔 소년',
+      '숲속 이끼 낀 돌계단을 오르는 여행자와 작은 정령들',
+      '눈 내리는 마을 골목, 따뜻한 불빛이 새어나오는 창문',
+      '거대한 나무 위에 지어진 목조 집과 하늘을 나는 배',
+    ];
+
+    const COUNTS = [1, 2, 4];
+    const STORAGE_KEY = 'ghibli-imagine:jobs:v1';
+    const MAX_STORED_JOBS = 40;
+
+    // ========================================
+    // 🛠 Utilities
+    // ========================================
+
+    const randomSeed = () => Math.floor(Math.random() * 1_000_000);
+
+    /** 사용자 프롬프트 + 분위기 + 지브리 스타일을 하나의 최종 프롬프트로 합성 */
+    function buildFinalPrompt(userPrompt, moodId) {
+      const mood = MOODS.find(m => m.id === moodId);
+      return [userPrompt.trim(), mood && mood.extra, GHIBLI_STYLE]
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    /** 이미지 생성 엔드포인트 URL (API 키 불필요, <img src>로 바로 사용) */
+    function buildImageUrl({ finalPrompt, width, height, seed }) {
+      const params = new URLSearchParams({
+        width: String(width),
+        height: String(height),
+        seed: String(seed),
+        model: 'flux',
+        nologo: 'true',
+      });
+      return `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?${params}`;
+    }
+
+    const HANGUL_RE = /[가-힣]/;
+
+    /**
+     * 생성 모델은 한국어 프롬프트를 사실상 무시하므로(한국어로 넣으면 장면이 반영되지 않음)
+     * 한글이 섞여 있으면 영어로 옮겨서 보낸다. 실패하면 원문을 그대로 쓴다.
+     */
+    async function translateToEnglish(text) {
+      if (!HANGUL_RE.test(text)) return { text, translated: false };
+      const url =
+        'https://translate.googleapis.com/translate_a/single?client=gtx&sl=ko&tl=en&dt=t&q=' +
+        encodeURIComponent(text);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('translation request failed');
+      const data = await res.json();
+      const out = (data[0] || []).map(seg => seg[0]).join('').trim();
+      if (!out) throw new Error('empty translation');
+      return { text: out, translated: true };
+    }
+
+    /**
+     * 이미지 요청 큐.
+     * 생성 엔드포인트는 동시 요청을 거절하므로 한 번에 한 장씩, 최소 간격을 두고 요청한다.
+     */
+    const imageQueue = {
+      _q: [],
+      _active: 0,
+      _timer: null,
+      maxConcurrent: 1,
+      minGapMs: 1500,
+      hardTimeoutMs: 60000,
+      _lastStart: 0,
+
+      enqueue(task) {
+        this._q.push(task);
+        this._pump();
+      },
+
+      _pump() {
+        if (this._timer || this._active >= this.maxConcurrent || this._q.length === 0) return;
+
+        const wait = Math.max(0, this._lastStart + this.minGapMs - Date.now());
+        if (wait > 0) {
+          this._timer = setTimeout(() => { this._timer = null; this._pump(); }, wait);
+          return;
+        }
+
+        const task = this._q.shift();
+        this._active += 1;
+        this._lastStart = Date.now();
+
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          this._active -= 1;
+          this._pump();
+        };
+        // 응답이 끝내 오지 않아도 큐가 막히지 않도록 하드 타임아웃
+        setTimeout(release, this.hardTimeoutMs);
+        task(release);
+      },
+    };
+
+    function formatTime(ts) {
+      const d = new Date(ts);
+      const p = n => String(n).padStart(2, '0');
+      return `${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    /** 크로스오리진 이미지를 blob 으로 받아 저장. 실패 시 새 탭으로 폴백 */
+    async function downloadImage(url, filename) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('fetch failed');
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 3000);
+      } catch (e) {
+        window.open(url, '_blank', 'noopener');
+      }
+    }
+
+    function loadJobs() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveJobs(jobs) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs.slice(0, MAX_STORED_JOBS)));
+      } catch (e) {
+        /* 용량 초과 등은 무시 — 저장 실패가 앱 동작을 막지 않도록 */
+      }
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({
+      variant = 'primary',
+      size = 'md',
+      disabled = false,
+      onClick,
+      type = 'button',
+      className = '',
+      children,
+      ...rest
+    }) {
+      const base =
+        'inline-flex items-center justify-center gap-2 font-medium rounded-xl transition-all ' +
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-2 ' +
+        'focus-visible:ring-offset-[#0f1115] disabled:opacity-40 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-emerald-500 hover:bg-emerald-400 text-slate-900 shadow-lg shadow-emerald-500/20',
+        secondary: 'bg-white/5 hover:bg-white/10 text-slate-100 border border-white/10',
+        danger: 'bg-rose-500/90 hover:bg-rose-500 text-white',
+        ghost: 'bg-transparent hover:bg-white/10 text-slate-300',
+      };
+      const sizes = {
+        sm: 'px-3 py-1.5 text-xs',
+        md: 'px-4 py-2 text-sm',
+        lg: 'px-6 py-3 text-base',
+      };
+      return (
+        <button
+          type={type}
+          onClick={onClick}
+          disabled={disabled}
+          className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Textarea({ label, value, onChange, placeholder, rows = 3, error, disabled, onKeyDown, className = '' }) {
+      return (
+        <div className={className}>
+          {label && <label className="block mb-2 text-sm font-medium text-slate-300">{label}</label>}
+          <textarea
+            value={value}
+            onChange={onChange}
+            onKeyDown={onKeyDown}
+            placeholder={placeholder}
+            rows={rows}
+            disabled={disabled}
+            className={`w-full resize-none rounded-2xl bg-[#161a21] border px-4 py-3 text-[15px] leading-relaxed
+              text-slate-100 placeholder:text-slate-500 transition
+              focus:outline-none focus:ring-2 focus:ring-emerald-400/60 focus:border-transparent
+              disabled:opacity-50 ${error ? 'border-rose-500/70' : 'border-white/10'}`}
+          />
+          {error && <p className="mt-1.5 text-xs text-rose-400">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <div className={`rounded-2xl bg-[#151920] border border-white/10 shadow-xl shadow-black/30 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'default', className = '', children }) {
+      const tones = {
+        default: 'bg-white/5 text-slate-300 border-white/10',
+        emerald: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+        amber: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Spinner({ className = 'w-6 h-6' }) {
+      return (
+        <svg className={`animate-spin text-emerald-400 ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-90" fill="currentColor" d="M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7V2z" />
+        </svg>
+      );
+    }
+
+    function SegmentedControl({ options, value, onChange, ariaLabel }) {
+      return (
+        <div role="radiogroup" aria-label={ariaLabel} className="inline-flex rounded-xl bg-[#12161c] border border-white/10 p-1 gap-1">
+          {options.map(opt => {
+            const active = opt.id === value;
+            return (
+              <button
+                key={opt.id}
+                role="radio"
+                aria-checked={active}
+                onClick={() => onChange(opt.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition
+                  ${active ? 'bg-emerald-500 text-slate-900' : 'text-slate-400 hover:text-slate-100 hover:bg-white/5'}`}
+              >
+                {opt.label}
+                {opt.sub && <span className="hidden sm:inline ml-1 opacity-60">{opt.sub}</span>}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'lg', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = e => { if (e.key === 'Escape') onClose(); };
+        document.addEventListener('keydown', onKey);
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+          document.removeEventListener('keydown', onKey);
+          document.body.style.overflow = prev;
+        };
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+
+      const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-5xl', xl: 'max-w-7xl' };
+
+      return (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          onClick={onClose}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className={`w-full ${sizes[size]} max-h-[92vh] overflow-y-auto rounded-2xl bg-[#151920] border border-white/10 shadow-2xl fade-up`}
+          >
+            <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-white/10 sticky top-0 bg-[#151920]/95 backdrop-blur z-10">
+              <h2 className="text-sm font-semibold text-slate-200 truncate">{title}</h2>
+              <button
+                onClick={onClose}
+                aria-label="닫기"
+                className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-white/10 transition"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-5">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Toast({ message }) {
+      if (!message) return null;
+      return (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] fade-up">
+          <div className="rounded-full bg-slate-900 border border-white/15 px-4 py-2 text-sm text-slate-100 shadow-2xl">
+            {message}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common Components
+    // ========================================
+
+    function Header({ totalImages, onOpenGuide }) {
+      return (
+        <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0f1115]/85 backdrop-blur-xl">
+          <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="floaty w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-400 to-sky-500 grid place-items-center text-lg shadow-lg shadow-emerald-500/25">
+                🌿
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-base font-bold tracking-tight truncate">Ghibli Imagine</h1>
+                <p className="text-[11px] text-slate-500 truncate">프롬프트를 지브리풍 그림으로</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge tone="emerald" className="hidden sm:inline-flex">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                스타일 고정 · Ghibli
+              </Badge>
+              <Badge className="hidden md:inline-flex">생성 {totalImages}장</Badge>
+              <Button variant="ghost" size="sm" onClick={onOpenGuide}>도움말</Button>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function MoodPicker({ value, onChange }) {
+      return (
+        <div className="flex flex-wrap gap-2">
+          {MOODS.map(m => {
+            const active = m.id === value;
+            return (
+              <button
+                key={m.id}
+                onClick={() => onChange(m.id)}
+                aria-pressed={active}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition
+                  ${active
+                    ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300'
+                    : 'bg-white/[0.03] border-white/10 text-slate-400 hover:text-slate-100 hover:border-white/25'}`}
+              >
+                <span className="mr-1">{m.emoji}</span>{m.label}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🖼 Image Tile (로딩/에러/재시도 자체 처리)
+    // ========================================
+
+    const MAX_ATTEMPTS = 4;
+
+    function ImageTile({ image, boxClass, onOpen, onDownload, index }) {
+      const [status, setStatus] = useState('queued'); // queued | loading | done | error
+      const [src, setSrc] = useState(null);
+      const attemptRef = useRef(0);
+      const releaseRef = useRef(null);
+      const aliveRef = useRef(true);
+      const retryTimerRef = useRef(null);
+
+      /** 큐에 자리를 요청하고, 차례가 오면 실제 요청(=img src 세팅)을 건다 */
+      const request = useCallback(() => {
+        setStatus('queued');
+        imageQueue.enqueue(release => {
+          if (!aliveRef.current) { release(); return; }
+          releaseRef.current = release;
+          attemptRef.current += 1;
+          setStatus('loading');
+          setSrc(attemptRef.current > 1 ? `${image.url}&_r=${attemptRef.current}` : image.url);
+        });
+      }, [image.url]);
+
+      useEffect(() => {
+        aliveRef.current = true;
+        request();
+        return () => {
+          aliveRef.current = false;
+          clearTimeout(retryTimerRef.current);
+          if (releaseRef.current) { releaseRef.current(); releaseRef.current = null; }
+        };
+      }, [request]);
+
+      const release = () => {
+        if (releaseRef.current) { releaseRef.current(); releaseRef.current = null; }
+      };
+
+      const handleLoad = () => {
+        release();
+        setStatus('done');
+      };
+
+      const handleError = () => {
+        release();
+        if (attemptRef.current < MAX_ATTEMPTS) {
+          // 혼잡으로 거절된 경우가 대부분 — 백오프 후 자동 재시도
+          const backoff = 6000 * attemptRef.current;
+          setStatus('queued');
+          retryTimerRef.current = setTimeout(() => {
+            if (aliveRef.current) request();
+          }, backoff);
+        } else {
+          setStatus('error');
+        }
+      };
+
+      const manualRetry = e => {
+        e.stopPropagation();
+        attemptRef.current = 0;
+        request();
+      };
+
+      return (
+        <div className={`group relative overflow-hidden rounded-2xl border border-white/10 bg-[#12161c] ${boxClass}`}>
+          {status !== 'error' && src && (
+            <img
+              src={src}
+              alt={`생성 이미지 ${index + 1}: ${image.userPrompt}`}
+              onLoad={handleLoad}
+              onError={handleError}
+              onClick={() => status === 'done' && onOpen(image)}
+              className={`w-full h-full object-cover transition duration-500
+                ${status === 'done' ? 'opacity-100 cursor-zoom-in group-hover:scale-[1.03]' : 'opacity-0'}`}
+            />
+          )}
+
+          {(status === 'loading' || status === 'queued') && (
+            <div className="absolute inset-0 shimmer grid place-items-center">
+              <div className="flex flex-col items-center gap-2">
+                <Spinner />
+                <span className="text-[11px] text-slate-400">
+                  {status === 'queued' ? '대기 중…' : '그리는 중…'}
+                </span>
+                {attemptRef.current > 1 && (
+                  <span className="text-[10px] text-slate-600">재시도 {attemptRef.current - 1}회</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {status === 'error' && (
+            <div className="absolute inset-0 grid place-items-center bg-[#141820] px-4 text-center">
+              <div>
+                <p className="text-xs text-slate-400 mb-3">이미지를 불러오지 못했어요</p>
+                <Button size="sm" variant="secondary" onClick={manualRetry}>다시 시도</Button>
+              </div>
+            </div>
+          )}
+
+          {status === 'done' && (
+            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 p-2.5
+                            bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition">
+              <span className="text-[10px] text-slate-300 font-mono">seed {image.seed}</span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={e => { e.stopPropagation(); onOpen(image); }}
+                  aria-label="크게 보기"
+                  className="rounded-lg bg-white/10 hover:bg-white/20 p-1.5 text-white backdrop-blur transition"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); onDownload(image); }}
+                  aria-label="다운로드"
+                  className="rounded-lg bg-white/10 hover:bg-white/20 p-1.5 text-white backdrop-blur transition"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧾 Job Card (하나의 생성 요청 = 이미지 N장)
+    // ========================================
+
+    function JobCard({ job, onOpen, onDownload, onRerun, onVary, onDelete }) {
+      const ratio = RATIOS.find(r => r.id === job.ratio) || RATIOS[0];
+      const mood = MOODS.find(m => m.id === job.mood);
+      const gridCols = job.images.length === 1
+        ? 'grid-cols-1 max-w-xl'
+        : job.images.length === 2
+          ? 'grid-cols-1 sm:grid-cols-2'
+          : 'grid-cols-1 sm:grid-cols-2';
+
+      return (
+        <Card className="p-4 sm:p-5 fade-up">
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] text-slate-100 leading-relaxed break-words">{job.userPrompt}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <Badge tone="emerald">🌿 Ghibli</Badge>
+                {mood && mood.id !== 'none' && <Badge>{mood.emoji} {mood.label}</Badge>}
+                <Badge>{ratio.label}</Badge>
+                <Badge>{job.images.length}장</Badge>
+                <span className="text-[11px] text-slate-500 ml-1">{formatTime(job.createdAt)}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" variant="secondary" onClick={() => onVary(job)} title="같은 프롬프트, 다른 시드">
+                🎲 변형
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => onRerun(job)} title="이 설정을 입력창에 불러오기">
+                ✏️ 불러오기
+              </Button>
+              <button
+                onClick={() => onDelete(job.id)}
+                aria-label="삭제"
+                className="rounded-lg p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div className={`grid gap-3 ${gridCols}`}>
+            {job.images.map((img, i) => (
+              <ImageTile
+                key={img.id}
+                image={img}
+                index={i}
+                boxClass={ratio.box}
+                onOpen={onOpen}
+                onDownload={onDownload}
+              />
+            ))}
+          </div>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🔍 Image Viewer Modal
+    // ========================================
+
+    function ImageViewer({ image, onClose, onDownload, onVary, onCopy }) {
+      if (!image) return null;
+      return (
+        <Modal isOpen={!!image} onClose={onClose} title={image.userPrompt} size="xl">
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="rounded-2xl overflow-hidden bg-black/40 border border-white/10 grid place-items-center">
+              <img src={image.url} alt={image.userPrompt} className="max-h-[70vh] w-auto object-contain" />
+            </div>
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-xs font-semibold text-slate-400 mb-1.5">내 프롬프트</h3>
+                <p className="text-sm text-slate-100 leading-relaxed break-words">{image.userPrompt}</p>
+              </div>
+              {image.modelPrompt && image.modelPrompt !== image.userPrompt && (
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-400 mb-1.5">번역된 프롬프트</h3>
+                  <p className="text-sm text-slate-300 leading-relaxed break-words">{image.modelPrompt}</p>
+                </div>
+              )}
+              <div>
+                <h3 className="text-xs font-semibold text-slate-400 mb-1.5">최종 프롬프트 (스타일 포함)</h3>
+                <p className="text-[11px] text-slate-500 leading-relaxed break-words max-h-40 overflow-y-auto rounded-xl bg-black/30 p-3 border border-white/5">
+                  {image.finalPrompt}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Badge tone="emerald">🌿 Ghibli</Badge>
+                <Badge>{image.ratio}</Badge>
+                <Badge className="font-mono">seed {image.seed}</Badge>
+              </div>
+              <div className="grid gap-2">
+                <Button onClick={() => onDownload(image)}>⬇ 이미지 저장</Button>
+                <Button variant="secondary" onClick={() => onVary(image)}>🎲 이 프롬프트로 변형 생성</Button>
+                <Button variant="ghost" onClick={() => onCopy(image.finalPrompt)}>📋 최종 프롬프트 복사</Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📄 Prompt Composer (메인 입력부)
+    // ========================================
+
+    function PromptComposer({
+      prompt, setPrompt,
+      mood, setMood,
+      ratio, setRatio,
+      count, setCount,
+      lockSeed, setLockSeed,
+      seed, setSeed,
+      onGenerate,
+      error,
+      busy,
+    }) {
+      const [showFinal, setShowFinal] = useState(false);
+      const finalPrompt = useMemo(() => buildFinalPrompt(prompt || '(프롬프트를 입력하세요)', mood), [prompt, mood]);
+
+      const handleKeyDown = e => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          onGenerate();
+        }
+      };
+
+      return (
+        <Card className="p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-200">프롬프트</span>
+              <Badge tone="emerald">🌿 지브리 스타일 자동 적용</Badge>
+              <Badge className="hidden sm:inline-flex">🇰🇷→🇬🇧 자동 번역</Badge>
+            </div>
+            <button
+              onClick={() => setShowFinal(v => !v)}
+              className="text-[11px] text-slate-500 hover:text-slate-300 transition"
+            >
+              {showFinal ? '최종 프롬프트 숨기기' : '최종 프롬프트 보기'}
+            </button>
+          </div>
+
+          <Textarea
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={3}
+            error={error}
+            placeholder="예) 빨간 우산을 쓴 소녀가 시골 버스 정류장에서 비를 피하고 있다 &#10;(Ctrl/⌘ + Enter 로 바로 생성)"
+          />
+
+          {showFinal && (
+            <div className="mt-2 rounded-xl bg-black/30 border border-white/5 p-3 space-y-2">
+              {HANGUL_RE.test(prompt) && (
+                <p className="text-[11px] text-emerald-400/80">
+                  ※ 생성 모델은 한국어를 인식하지 못해, 생성 직전에 앞부분이 영어로 자동 번역됩니다.
+                </p>
+              )}
+              <p className="text-[11px] leading-relaxed text-slate-500 break-words">{finalPrompt}</p>
+            </div>
+          )}
+
+          <div className="mt-4 space-y-3">
+            <div>
+              <p className="mb-2 text-xs font-medium text-slate-400">분위기</p>
+              <MoodPicker value={mood} onChange={setMood} />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-400">화면 비율</p>
+                <SegmentedControl
+                  ariaLabel="화면 비율"
+                  options={RATIOS.map(r => ({ id: r.id, label: r.label }))}
+                  value={ratio}
+                  onChange={setRatio}
+                />
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-400">생성 장수</p>
+                <SegmentedControl
+                  ariaLabel="생성 장수"
+                  options={COUNTS.map(c => ({ id: String(c), label: `${c}장` }))}
+                  value={String(count)}
+                  onChange={v => setCount(Number(v))}
+                />
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-400">시드</p>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={lockSeed}
+                      onChange={e => setLockSeed(e.target.checked)}
+                      className="w-4 h-4 rounded accent-emerald-500"
+                    />
+                    고정
+                  </label>
+                  <input
+                    type="number"
+                    value={seed}
+                    disabled={!lockSeed}
+                    onChange={e => setSeed(e.target.value.replace(/\D/g, '').slice(0, 7))}
+                    className="w-24 rounded-lg bg-[#12161c] border border-white/10 px-2.5 py-1.5 text-xs font-mono text-slate-200
+                               focus:outline-none focus:ring-2 focus:ring-emerald-400/60 disabled:opacity-40"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-1.5">
+              {EXAMPLE_PROMPTS.slice(0, 3).map(ex => (
+                <button
+                  key={ex}
+                  onClick={() => setPrompt(ex)}
+                  className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-400
+                             hover:text-slate-100 hover:border-white/25 transition max-w-[240px] truncate"
+                  title={ex}
+                >
+                  💡 {ex}
+                </button>
+              ))}
+            </div>
+            <Button size="lg" onClick={onGenerate} disabled={busy} className="w-full sm:w-auto">
+              {busy ? <><Spinner className="w-4 h-4" /> 준비 중…</> : '✨ 이미지 생성'}
+            </Button>
+          </div>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🌱 Empty State
+    // ========================================
+
+    function EmptyState({ onPick }) {
+      return (
+        <div className="text-center py-14">
+          <div className="floaty mx-auto w-20 h-20 rounded-3xl bg-gradient-to-br from-emerald-400/20 to-sky-500/20 border border-white/10 grid place-items-center text-4xl mb-5">
+            🖼️
+          </div>
+          <h2 className="text-lg font-semibold text-slate-200">아직 만든 그림이 없어요</h2>
+          <p className="mt-2 text-sm text-slate-500">
+            떠오르는 장면을 한국어로 적어보세요. 나머지 지브리풍 연출은 알아서 붙습니다.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-2xl mx-auto">
+            {EXAMPLE_PROMPTS.map(ex => (
+              <button
+                key={ex}
+                onClick={() => onPick(ex)}
+                className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs text-slate-400
+                           hover:text-slate-100 hover:border-emerald-400/40 hover:bg-emerald-500/5 transition"
+              >
+                {ex}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+
+    function App() {
+      const [prompt, setPrompt] = useState('');
+      const [mood, setMood] = useState('none');
+      const [ratio, setRatio] = useState('1:1');
+      const [count, setCount] = useState(4);
+      const [lockSeed, setLockSeed] = useState(false);
+      const [seed, setSeed] = useState(String(randomSeed()));
+      const [error, setError] = useState('');
+      const [busy, setBusy] = useState(false);
+
+      const [jobs, setJobs] = useState(() => loadJobs());
+      const [viewer, setViewer] = useState(null);
+      const [guideOpen, setGuideOpen] = useState(false);
+      const [toast, setToast] = useState('');
+      const toastTimer = useRef(null);
+      const topRef = useRef(null);
+
+      useEffect(() => { saveJobs(jobs); }, [jobs]);
+
+      useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+      const showToast = useCallback(msg => {
+        setToast(msg);
+        clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(''), 2200);
+      }, []);
+
+      const totalImages = useMemo(
+        () => jobs.reduce((sum, j) => sum + j.images.length, 0),
+        [jobs]
+      );
+
+      /** 생성: 설정값으로 이미지 URL N개를 만들어 새 job 으로 쌓는다 */
+      const createJob = useCallback((opts) => {
+        const {
+          userPrompt,                 // 화면에 보여줄 원문(보통 한국어)
+          modelPrompt = userPrompt,   // 모델에 실제로 보낼 문장(영어)
+          mood: jobMood = 'none',
+          ratio: jobRatio = '1:1',
+          count: jobCount = 4,
+          baseSeed = null,
+        } = opts;
+
+        const r = RATIOS.find(x => x.id === jobRatio) || RATIOS[0];
+        const finalPrompt = buildFinalPrompt(modelPrompt, jobMood);
+        const start = baseSeed !== null ? Number(baseSeed) : randomSeed();
+        const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+        const images = Array.from({ length: jobCount }, (_, i) => {
+          const s = (start + i * 7919) % 1_000_000; // 장마다 다른 시드
+          return {
+            id: `${jobId}_${i}`,
+            seed: s,
+            userPrompt,
+            modelPrompt,
+            finalPrompt,
+            mood: jobMood,
+            ratio: jobRatio,
+            url: buildImageUrl({ finalPrompt, width: r.w, height: r.h, seed: s }),
+          };
+        });
+
+        const job = {
+          id: jobId,
+          userPrompt,
+          modelPrompt,
+          mood: jobMood,
+          ratio: jobRatio,
+          finalPrompt,
+          createdAt: Date.now(),
+          images,
+        };
+
+        setJobs(prev => [job, ...prev].slice(0, MAX_STORED_JOBS));
+        if (topRef.current) topRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, []);
+
+      const handleGenerate = async () => {
+        const trimmed = prompt.trim();
+        if (trimmed.length < 2) {
+          setError('무엇을 그릴지 두 글자 이상 적어주세요.');
+          return;
+        }
+        setError('');
+        setBusy(true);
+
+        let modelPrompt = trimmed;
+        try {
+          const result = await translateToEnglish(trimmed);
+          modelPrompt = result.text;
+        } catch (e) {
+          showToast('번역에 실패해 원문 그대로 생성합니다');
+        }
+
+        createJob({
+          userPrompt: trimmed,
+          modelPrompt,
+          mood,
+          ratio,
+          count,
+          baseSeed: lockSeed ? Number(seed || 0) : null,
+        });
+        if (!lockSeed) setSeed(String(randomSeed()));
+        setBusy(false);
+        showToast(`${count}장 생성을 시작했어요 · 한 장씩 순서대로 그려집니다`);
+      };
+
+      const handleVaryJob = job => {
+        createJob({
+          userPrompt: job.userPrompt,
+          modelPrompt: job.modelPrompt || job.userPrompt,
+          mood: job.mood,
+          ratio: job.ratio,
+          count: job.images.length,
+          baseSeed: null,
+        });
+        showToast('같은 프롬프트로 새 변형을 만드는 중');
+      };
+
+      const handleVaryImage = image => {
+        setViewer(null);
+        createJob({
+          userPrompt: image.userPrompt,
+          modelPrompt: image.modelPrompt || image.userPrompt,
+          mood: image.mood,
+          ratio: image.ratio,
+          count,
+          baseSeed: null,
+        });
+        showToast('변형 생성을 시작했어요');
+      };
+
+      const handleRerun = job => {
+        setPrompt(job.userPrompt);
+        setMood(job.mood);
+        setRatio(job.ratio);
+        setCount(job.images.length);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        showToast('설정을 입력창에 불러왔어요');
+      };
+
+      const handleDownload = image => {
+        const name = `ghibli_${image.seed}.jpg`;
+        downloadImage(image.url, name);
+        showToast('이미지를 저장합니다');
+      };
+
+      const handleCopy = async text => {
+        try {
+          await navigator.clipboard.writeText(text);
+          showToast('프롬프트를 복사했어요');
+        } catch (e) {
+          showToast('복사에 실패했어요');
+        }
+      };
+
+      const handleDelete = id => {
+        setJobs(prev => prev.filter(j => j.id !== id));
+        showToast('삭제했어요');
+      };
+
+      const handleClearAll = () => {
+        setJobs([]);
+        showToast('갤러리를 비웠어요');
+      };
+
+      return (
+        <div className="min-h-screen">
+          <Header totalImages={totalImages} onOpenGuide={() => setGuideOpen(true)} />
+
+          {/* 배경 그라디언트 장식 */}
+          <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 h-[420px] bg-gradient-to-b from-emerald-500/10 via-sky-500/5 to-transparent" />
+
+          <main className="relative mx-auto max-w-6xl px-4 sm:px-6 py-6 space-y-6">
+            <PromptComposer
+              prompt={prompt} setPrompt={setPrompt}
+              mood={mood} setMood={setMood}
+              ratio={ratio} setRatio={setRatio}
+              count={count} setCount={setCount}
+              lockSeed={lockSeed} setLockSeed={setLockSeed}
+              seed={seed} setSeed={setSeed}
+              onGenerate={handleGenerate}
+              error={error}
+              busy={busy}
+            />
+
+            <div ref={topRef} className="flex items-center justify-between gap-3 pt-2">
+              <h2 className="text-sm font-semibold text-slate-300">
+                갤러리 <span className="text-slate-500 font-normal">({jobs.length}개 요청 · {totalImages}장)</span>
+              </h2>
+              {jobs.length > 0 && (
+                <Button size="sm" variant="ghost" onClick={handleClearAll}>전체 비우기</Button>
+              )}
+            </div>
+
+            {jobs.length === 0 ? (
+              <EmptyState onPick={setPrompt} />
+            ) : (
+              <div className="space-y-5">
+                {jobs.map(job => (
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    onOpen={setViewer}
+                    onDownload={handleDownload}
+                    onRerun={handleRerun}
+                    onVary={handleVaryJob}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </div>
+            )}
+
+            <footer className="pt-6 pb-10 text-center text-[11px] text-slate-600">
+              모든 그림은 지브리풍 스타일이 강제로 적용됩니다 · 생성 결과는 브라우저에만 저장됩니다
+            </footer>
+          </main>
+
+          <ImageViewer
+            image={viewer}
+            onClose={() => setViewer(null)}
+            onDownload={handleDownload}
+            onVary={handleVaryImage}
+            onCopy={handleCopy}
+          />
+
+          <Modal isOpen={guideOpen} onClose={() => setGuideOpen(false)} title="사용 가이드" size="md">
+            <div className="space-y-4 text-sm text-slate-300 leading-relaxed">
+              <div>
+                <h3 className="font-semibold text-slate-100 mb-1">1. 장면을 적으세요</h3>
+                <p className="text-slate-400">
+                  "누가 / 어디서 / 무엇을 / 어떤 빛" 순으로 적으면 결과가 안정적입니다.
+                  스타일 단어(수채화, 애니풍 등)는 굳이 넣지 않아도 됩니다 — 지브리 지문이 항상 자동으로 붙습니다.
+                  생성 모델이 한국어를 인식하지 못하기 때문에, 한글 프롬프트는 생성 직전에 영어로 자동 번역해서 보냅니다.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-100 mb-1">2. 분위기 · 비율 · 장수</h3>
+                <p className="text-slate-400">
+                  분위기 칩은 계절과 조명을 바꿉니다. 한 번에 최대 4장까지 만들고, 마음에 드는 컷에서 <b>변형</b>으로 이어가세요.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-100 mb-1">3. 시드</h3>
+                <p className="text-slate-400">
+                  시드를 <b>고정</b>하면 같은 프롬프트가 같은 그림을 냅니다. 프롬프트를 조금씩 바꿔가며 비교할 때 유용합니다.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-100 mb-1">단축키</h3>
+                <p className="text-slate-400"><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-xs">Ctrl/⌘</kbd> + <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-xs">Enter</kbd> 생성 · <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-xs">Esc</kbd> 닫기</p>
+              </div>
+              <p className="text-[11px] text-slate-500 border-t border-white/10 pt-3">
+                이미지는 Pollinations(flux) 공개 엔드포인트로 생성됩니다. 동시 요청이 제한돼 있어 <b>한 장씩 순서대로</b>
+                그려지며, 장당 10~30초 정도 걸립니다. 실패하면 자동으로 2회까지 재시도하고, 그래도 안 되면
+                타일의 <b>다시 시도</b>를 눌러 주세요.
+              </p>
+            </div>
+          </Modal>
+
+          <Toast message={toast} />
+        </div>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

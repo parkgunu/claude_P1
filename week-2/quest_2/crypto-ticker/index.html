@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>실시간 코인 시세</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ CDN 버전 고정 필수 (Babel 은 반드시 7.x) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현 불가능한 키프레임 애니메이션 */
+    @keyframes flashUp {
+      0%   { background-color: rgba(16, 185, 129, 0.20); }
+      100% { background-color: transparent; }
+    }
+    @keyframes flashDown {
+      0%   { background-color: rgba(239, 68, 68, 0.18); }
+      100% { background-color: transparent; }
+    }
+    .flash-up   { animation: flashUp 1.1s ease-out; }
+    .flash-down { animation: flashDown 1.1s ease-out; }
+  </style>
+</head>
+<body class="bg-white text-slate-900">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ========================================
+    // ⚙️ Config & Constants
+    // ========================================
+
+    const API_BASE_URL = 'https://api.coingecko.com/api/v3';
+    const API_KEY = 'CG-xSdkt34UXE27fhtmxT1WEF4u'; // CoinGecko Demo key
+    const REFRESH_INTERVAL = 15;  // 자동 갱신 주기(초)
+    const PER_PAGE = 250;         // 한 번에 불러오는 코인 수 (CoinGecko 최대값)
+    const MAX_PAGES = 4;          // 최대 1,000개까지 (Demo 키 호출 한도 고려)
+    const ROW_STEP = 100;         // '더 보기' 클릭당 노출 행 수
+    const SEARCH_LIMIT = 50;      // 검색 결과 최대 개수
+
+    // CoinGecko /search API 는 한글 질의를 지원하지 않는다.
+    // → 주요 코인은 아래 한글 별칭 표로 직접 id 를 찾아 시세를 조회한다.
+    const KOREAN_ALIASES = {
+      bitcoin: '비트코인', ethereum: '이더리움', tether: '테더', binancecoin: '바이낸스코인 비앤비',
+      ripple: '리플 엑스알피', 'usd-coin': '유에스디코인 유에스디씨', solana: '솔라나',
+      dogecoin: '도지코인 도지', cardano: '에이다 카르다노', tron: '트론', toncoin: '톤코인 톤',
+      'avalanche-2': '아발란체 아발란체코인', chainlink: '체인링크', polkadot: '폴카닷',
+      'bitcoin-cash': '비트코인캐시', sui: '수이', litecoin: '라이트코인', near: '니어프로토콜 니어',
+      uniswap: '유니스왑', aptos: '앱토스', stellar: '스텔라루멘 스텔라', monero: '모네로',
+      'internet-computer': '인터넷컴퓨터', 'ethereum-classic': '이더리움클래식',
+      'hedera-hashgraph': '헤데라 해시그래프', filecoin: '파일코인', cosmos: '코스모스 아톰',
+      arbitrum: '아비트럼', optimism: '옵티미즘', vechain: '비체인', maker: '메이커',
+      'injective-protocol': '인젝티브', 'the-graph': '더그래프 그래프', algorand: '알고랜드',
+      aave: '에이브', fantom: '팬텀', 'theta-token': '세타토큰 세타', 'axie-infinity': '엑시인피니티',
+      'the-sandbox': '샌드박스', decentraland: '디센트럴랜드', eos: '이오스', tezos: '테조스',
+      neo: '네오', chiliz: '칠리즈', 'quant-network': '퀀트', 'render-token': '렌더토큰 렌더',
+      'immutable-x': '이뮤터블', pepe: '페페', 'shiba-inu': '시바이누',
+      'polygon-ecosystem-token': '폴리곤 폴', kaspa: '카스파', bittensor: '비트텐서',
+      'worldcoin-wld': '월드코인', 'ondo-finance': '온도파이낸스 온도', 'pyth-network': '피스네트워크',
+      'sei-network': '세이', celestia: '셀레스티아', mantle: '맨틀', stacks: '스택스', bonk: '봉크',
+      'jupiter-exchange-solana': '주피터', ethena: '에테나', 'wrapped-bitcoin': '랩트비트코인',
+      dai: '다이', 'leo-token': '레오토큰', okb: '오케이비', cronos: '크로노스',
+      'kucoin-shares': '쿠코인', gala: '갈라', flow: '플로우', kaia: '카이아 클레이튼 클레이',
+      'wemix-token': '위믹스', icon: '아이콘', ontology: '온톨로지', qtum: '퀀텀', zilliqa: '질리카',
+      dash: '대시', zcash: '지캐시', iota: '아이오타', 'elrond-erd-2': '멀티버스엑스',
+      kava: '카바', 'curve-dao-token': '커브', 'lido-dao': '리도다오',
+      'synthetix-network-token': '신세틱스', enjincoin: '엔진코인', 'basic-attention-token': '베이직어텐션토큰',
+      storj: '스토리지', sushi: '스시스왑', loopring: '루프링', 'mask-network': '마스크네트워크',
+      ravencoin: '레이븐코인', celo: '셀로', arweave: '아르위브', astar: '아스타',
+      'conflux-token': '컨플럭스', 'bitget-token': '비트겟', gmx: '지엠엑스', dydx: '디와이디엑스',
+      blur: '블러', starknet: '스타크넷', jasmycoin: '재스미', 'flare-networks': '플레어',
+      'coredaoorg': '코어다오',
+    };
+
+    const SORT_OPTIONS = [
+      { value: 'market_cap', label: '시가총액순' },
+      { value: 'gainers',    label: '상승률순' },
+      { value: 'losers',     label: '하락률순' },
+      { value: 'price',      label: '가격순' },
+    ];
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+
+    function buildUrl(path, params) {
+      const search = new URLSearchParams({ ...params, x_cg_demo_api_key: API_KEY });
+      return `${API_BASE_URL}${path}?${search.toString()}`;
+    }
+
+    // no-store: 새로고침 / 자동 갱신 시 항상 서버의 최신 시세를 받아온다
+    async function fetchJson(url) {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(
+          res.status === 429
+            ? '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요. (429)'
+            : `데이터를 불러오지 못했습니다. (HTTP ${res.status})`
+        );
+      }
+      return res.json();
+    }
+
+    // 한글 별칭에서 코인 id 찾기 (공백 무시 부분 일치)
+    function matchAliasIds(query) {
+      const q = query.replace(/\s+/g, '').toLowerCase();
+      if (!q) return [];
+      return Object.keys(KOREAN_ALIASES).filter((id) =>
+        KOREAN_ALIASES[id].replace(/\s+/g, '').toLowerCase().includes(q)
+      );
+    }
+
+    function formatPrice(value) {
+      if (typeof value !== 'number' || Number.isNaN(value)) return '-';
+      // 1센트 미만 코인은 고정 소수점이면 0으로 뭉개지므로 유효숫자 기준으로 표기
+      if (value > 0 && value < 0.01) {
+        return '$' + value.toLocaleString('en-US', { maximumSignificantDigits: 4 });
+      }
+      const digits = value >= 1000 ? 2 : value >= 1 ? 4 : 6;
+      return '$' + value.toLocaleString('en-US', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      });
+    }
+
+    function formatPercent(value) {
+      if (typeof value !== 'number' || Number.isNaN(value)) return '-';
+      return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+    }
+
+    function formatCompact(value) {
+      if (typeof value !== 'number' || Number.isNaN(value)) return '-';
+      return '$' + new Intl.NumberFormat('ko-KR', {
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }).format(value);
+    }
+
+    function formatTime(date) {
+      if (!date) return '-';
+      return date.toLocaleTimeString('ko-KR', { hour12: false });
+    }
+
+    // 등락에 따른 색상 (상승=초록 / 하락=빨강 / 보합=회색)
+    function trendColor(value) {
+      if (typeof value !== 'number' || Number.isNaN(value)) return 'text-slate-500';
+      if (value > 0) return 'text-emerald-600';
+      if (value < 0) return 'text-red-600';
+      return 'text-slate-500';
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Card({ children, className = '' }) {
+      return (
+        <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, ...rest }) {
+      const base = 'inline-flex items-center justify-center gap-2 font-medium rounded-xl transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-slate-900 hover:bg-slate-700 text-white focus:ring-slate-400',
+        secondary: 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 focus:ring-slate-300',
+        ghost: 'bg-transparent hover:bg-slate-100 text-slate-600 focus:ring-slate-300',
+      };
+      const sizes = {
+        sm: 'text-xs px-3 py-1.5',
+        md: 'text-sm px-4 py-2',
+        lg: 'text-base px-5 py-2.5',
+      };
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ value, onChange, placeholder = '', type = 'text', className = '', ...rest }) {
+      return (
+        <input
+          type={type}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          className={`w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 ${className}`}
+          {...rest}
+        />
+      );
+    }
+
+    function Select({ value, onChange, options, className = '', ...rest }) {
+      return (
+        <select
+          value={value}
+          onChange={onChange}
+          className={`rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 ${className}`}
+          {...rest}
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      );
+    }
+
+    function Badge({ tone = 'neutral', className = '', children }) {
+      const tones = {
+        neutral: 'bg-slate-100 text-slate-600',
+        up: 'bg-emerald-50 text-emerald-700',
+        down: 'bg-red-50 text-red-700',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return (
+        <svg className={`animate-spin h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+      );
+    }
+
+    // ========================================
+    // 🪝 Custom Hooks
+    // ========================================
+
+    function useDebounced(value, delay) {
+      const [debounced, setDebounced] = useState(value);
+      useEffect(() => {
+        const timer = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(timer);
+      }, [value, delay]);
+      return debounced;
+    }
+
+    // 시세 데이터 로딩 + 자동 갱신 + 직전 대비 등락 틱 계산
+    function useMarketData(query, pageCount, intervalSec) {
+      const [coins, setCoins] = useState([]);
+      const [ticks, setTicks] = useState({});     // { [id]: 'up' | 'down' }
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [updatedAt, setUpdatedAt] = useState(null);
+
+      const prevPricesRef = useRef({});
+      const tickTimerRef = useRef(null);
+      const requestIdRef = useRef(0);
+
+      const applyResult = useCallback((list) => {
+        // 직전 가격과 비교해 상승/하락 틱을 계산 → 행 배경 플래시
+        const nextTicks = {};
+        list.forEach((c) => {
+          const prev = prevPricesRef.current[c.id];
+          const curr = c.current_price;
+          if (typeof prev === 'number' && typeof curr === 'number' && prev !== curr) {
+            nextTicks[c.id] = curr > prev ? 'up' : 'down';
+          }
+          if (typeof curr === 'number') prevPricesRef.current[c.id] = curr;
+        });
+
+        setCoins(list);
+        setTicks(nextTicks);
+        setUpdatedAt(new Date());
+        setError(null);
+
+        if (tickTimerRef.current) clearTimeout(tickTimerRef.current);
+        tickTimerRef.current = setTimeout(() => setTicks({}), 1200);
+      }, []);
+
+      const load = useCallback(async () => {
+        const reqId = ++requestIdRef.current;
+        setLoading(true);
+        try {
+          let list;
+
+          if (query) {
+            // 🔍 한글 별칭 매칭 + 전체 코인 원격 검색을 합쳐 id 목록을 만든다
+            const aliasIds = matchAliasIds(query);
+
+            let remoteIds = [];
+            if (/[a-z0-9]/i.test(query)) { // 한글만 입력된 경우 /search 는 결과가 없다
+              const found = await fetchJson(buildUrl('/search', { query }));
+              remoteIds = (found.coins || []).map((c) => c.id);
+            }
+
+            const ids = [...new Set([...aliasIds, ...remoteIds])].slice(0, SEARCH_LIMIT);
+            list = ids.length
+              ? await fetchJson(buildUrl('/coins/markets', {
+                  vs_currency: 'usd',
+                  ids: ids.join(','),
+                  order: 'market_cap_desc',
+                  per_page: String(SEARCH_LIMIT),
+                  page: '1',
+                  price_change_percentage: '1h,24h,7d',
+                }))
+              : [];
+          } else {
+            // 📈 시가총액 순위 목록 (페이지당 250개)
+            const pages = await Promise.all(
+              Array.from({ length: pageCount }, (_, i) =>
+                fetchJson(buildUrl('/coins/markets', {
+                  vs_currency: 'usd',
+                  order: 'market_cap_desc',
+                  per_page: String(PER_PAGE),
+                  page: String(i + 1),
+                  price_change_percentage: '1h,24h,7d',
+                }))
+              )
+            );
+            list = pages.flat();
+          }
+
+          if (reqId !== requestIdRef.current) return; // 오래된 응답 무시
+          applyResult(list);
+        } catch (e) {
+          if (reqId !== requestIdRef.current) return;
+          setError(e.message || '알 수 없는 오류가 발생했습니다.');
+        } finally {
+          if (reqId === requestIdRef.current) setLoading(false);
+        }
+      }, [query, pageCount, applyResult]);
+
+      // 최초 마운트(= 페이지 새로고침) / 검색어·페이지 변경 시 즉시 최신 시세 로드
+      useEffect(() => { load(); }, [load]);
+
+      // 자동 갱신
+      useEffect(() => {
+        if (!intervalSec) return;
+        const timer = setInterval(load, intervalSec * 1000);
+        return () => clearInterval(timer);
+      }, [load, intervalSec]);
+
+      useEffect(() => () => {
+        if (tickTimerRef.current) clearTimeout(tickTimerRef.current);
+      }, []);
+
+      return { coins, ticks, loading, error, updatedAt, refetch: load };
+    }
+
+    // 다음 자동 갱신까지 남은 시간(초)
+    function useCountdown(active, seconds, resetKey) {
+      const [left, setLeft] = useState(seconds);
+      useEffect(() => {
+        setLeft(seconds);
+        if (!active) return;
+        const timer = setInterval(() => setLeft((v) => (v > 0 ? v - 1 : 0)), 1000);
+        return () => clearInterval(timer);
+      }, [active, seconds, resetKey]);
+      return left;
+    }
+
+    // ========================================
+    // 🧩 Common Components
+    // ========================================
+
+    function Header({ updatedAt, loading, autoRefresh, onToggleAuto, onRefresh, countdown, total }) {
+      return (
+        <header className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">실시간 코인 시세</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                CoinGecko · USD 기준 · 표시 중인 코인{' '}
+                <span className="font-medium text-slate-700 tabular-nums">{total.toLocaleString('ko-KR')}</span>개
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={onToggleAuto} aria-pressed={autoRefresh}>
+                <span
+                  className={`h-2 w-2 rounded-full ${autoRefresh ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}
+                  aria-hidden="true"
+                />
+                {autoRefresh ? `자동 갱신 ${countdown}초 전` : '자동 갱신 꺼짐'}
+              </Button>
+              <Button variant="primary" size="sm" onClick={onRefresh} disabled={loading}>
+                {loading ? <Spinner /> : <span aria-hidden="true">↻</span>}
+                새로고침
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            마지막 갱신 <span className="tabular-nums text-slate-600">{formatTime(updatedAt)}</span>
+            {loading && <span className="ml-2 text-slate-500">불러오는 중…</span>}
+          </p>
+        </header>
+      );
+    }
+
+    function Toolbar({ query, onQueryChange, sort, onSortChange, searching }) {
+      return (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Input
+              type="search"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder="코인명 또는 심볼로 검색 (예: 비트코인, bitcoin, BTC)"
+              aria-label="코인 검색"
+              className="pr-10"
+            />
+            {searching && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <Spinner />
+              </span>
+            )}
+          </div>
+          <Select
+            value={sort}
+            onChange={(e) => onSortChange(e.target.value)}
+            options={SORT_OPTIONS}
+            aria-label="정렬 기준"
+            className="sm:w-40"
+          />
+        </div>
+      );
+    }
+
+    function ErrorState({ message, onRetry }) {
+      return (
+        <Card className="p-6 text-center border-red-200 bg-red-50/50">
+          <p className="text-red-600 font-medium">{message}</p>
+          <p className="mt-1 text-sm text-slate-500">네트워크 상태 또는 API 호출 한도를 확인해 주세요.</p>
+          <Button variant="secondary" size="sm" className="mt-4" onClick={onRetry}>다시 시도</Button>
+        </Card>
+      );
+    }
+
+    function EmptyState({ query }) {
+      return (
+        <Card className="p-10 text-center">
+          <p className="text-slate-700 font-medium">
+            '{query}' 에 해당하는 코인을 찾지 못했습니다.
+          </p>
+          <p className="mt-1 text-sm text-slate-500">
+            한글 검색은 주요 코인만 지원합니다. 영문명이나 심볼로 검색하면 전체 코인에서 찾습니다.
+          </p>
+        </Card>
+      );
+    }
+
+    function SkeletonRow() {
+      return (
+        <div className="flex items-center gap-4 px-4 sm:px-5 py-3.5 animate-pulse">
+          <div className="h-8 w-8 rounded-full bg-slate-100 shrink-0" />
+          <div className="flex-1 space-y-2">
+            <div className="h-3.5 w-28 bg-slate-100 rounded" />
+            <div className="h-2.5 w-12 bg-slate-100 rounded" />
+          </div>
+          <div className="space-y-2 text-right">
+            <div className="h-3.5 w-24 bg-slate-100 rounded ml-auto" />
+            <div className="h-2.5 w-14 bg-slate-100 rounded ml-auto" />
+          </div>
+        </div>
+      );
+    }
+
+    function CoinRow({ coin, tick }) {
+      const change = coin.price_change_percentage_24h;
+      const change1h = coin.price_change_percentage_1h_in_currency;
+      const isUp = typeof change === 'number' && change > 0;
+      const isDown = typeof change === 'number' && change < 0;
+      const flashClass = tick === 'up' ? 'flash-up' : tick === 'down' ? 'flash-down' : '';
+
+      return (
+        <li className={`flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3.5 border-b border-slate-100 last:border-b-0 hover:bg-slate-50/70 ${flashClass}`}>
+          <span className="w-8 shrink-0 text-xs text-slate-400 tabular-nums">
+            {coin.market_cap_rank || '-'}
+          </span>
+
+          <img
+            src={coin.image}
+            alt=""
+            loading="lazy"
+            className="h-7 w-7 rounded-full shrink-0 bg-slate-100"
+          />
+
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-slate-900 truncate">{coin.name}</p>
+            <p className="text-xs text-slate-400 uppercase">{coin.symbol}</p>
+          </div>
+
+          <div className="hidden md:block w-28 text-right text-sm text-slate-500 tabular-nums">
+            {formatCompact(coin.market_cap)}
+          </div>
+
+          <div className="hidden sm:block w-20 text-right">
+            <span className={`text-sm font-medium tabular-nums ${trendColor(change1h)}`}>
+              {formatPercent(change1h)}
+            </span>
+          </div>
+
+          <div className="w-28 sm:w-32 text-right shrink-0">
+            <p className={`font-semibold tabular-nums ${trendColor(change)}`}>
+              {formatPrice(coin.current_price)}
+            </p>
+            <div className="mt-0.5 flex items-center justify-end gap-1">
+              {tick && (
+                <span
+                  className={`text-[10px] ${tick === 'up' ? 'text-emerald-600' : 'text-red-600'}`}
+                  aria-hidden="true"
+                >
+                  {tick === 'up' ? '▲' : '▼'}
+                </span>
+              )}
+              <Badge tone={isUp ? 'up' : isDown ? 'down' : 'neutral'}>
+                <span aria-hidden="true">{isUp ? '▲' : isDown ? '▼' : '–'}</span>
+                {formatPercent(change)}
+                <span className="sr-only">24시간 등락률</span>
+              </Badge>
+            </div>
+          </div>
+        </li>
+      );
+    }
+
+    function ListHeader() {
+      return (
+        <div className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-2.5 border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-500 rounded-t-2xl">
+          <span className="w-8 shrink-0">#</span>
+          <span className="w-7 shrink-0" aria-hidden="true" />
+          <span className="flex-1">코인</span>
+          <span className="hidden md:block w-28 text-right">시가총액</span>
+          <span className="hidden sm:block w-20 text-right">1시간</span>
+          <span className="w-28 sm:w-32 text-right">현재가 / 24시간</span>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+
+    function App() {
+      const [rawQuery, setRawQuery] = useState('');
+      const [sort, setSort] = useState('market_cap');
+      const [pageCount, setPageCount] = useState(1);
+      const [visible, setVisible] = useState(ROW_STEP);
+      const [autoRefresh, setAutoRefresh] = useState(true);
+
+      const query = useDebounced(rawQuery.trim(), 400);
+      const isSearching = Boolean(query);
+
+      const { coins, ticks, loading, error, updatedAt, refetch } = useMarketData(
+        query,
+        pageCount,
+        autoRefresh ? REFRESH_INTERVAL : 0
+      );
+
+      const countdown = useCountdown(autoRefresh, REFRESH_INTERVAL, updatedAt);
+
+      // 검색어가 바뀌면 노출 행 수 초기화
+      useEffect(() => { setVisible(ROW_STEP); }, [query]);
+
+      const sorted = useMemo(() => {
+        const list = [...coins];
+        const pct = (c) => (typeof c.price_change_percentage_24h === 'number' ? c.price_change_percentage_24h : 0);
+        if (sort === 'gainers') list.sort((a, b) => pct(b) - pct(a));
+        else if (sort === 'losers') list.sort((a, b) => pct(a) - pct(b));
+        else if (sort === 'price') list.sort((a, b) => (b.current_price || 0) - (a.current_price || 0));
+        else list.sort((a, b) => (a.market_cap_rank || 1e9) - (b.market_cap_rank || 1e9));
+        return list;
+      }, [coins, sort]);
+
+      const shown = isSearching ? sorted : sorted.slice(0, visible);
+      const canLoadMore = !isSearching && (visible < coins.length || pageCount < MAX_PAGES);
+
+      const handleLoadMore = () => {
+        if (visible + ROW_STEP > coins.length && pageCount < MAX_PAGES) {
+          setPageCount((p) => p + 1);
+        }
+        setVisible((v) => v + ROW_STEP);
+      };
+
+      const isInitialLoading = loading && coins.length === 0;
+
+      return (
+        <main className="min-h-screen px-4 py-8 sm:py-12">
+          <div className="mx-auto w-full max-w-4xl space-y-5">
+            <Header
+              updatedAt={updatedAt}
+              loading={loading}
+              autoRefresh={autoRefresh}
+              onToggleAuto={() => setAutoRefresh((v) => !v)}
+              onRefresh={refetch}
+              countdown={countdown}
+              total={coins.length}
+            />
+
+            <Toolbar
+              query={rawQuery}
+              onQueryChange={setRawQuery}
+              sort={sort}
+              onSortChange={setSort}
+              searching={loading && isSearching}
+            />
+
+            {error && coins.length === 0 && <ErrorState message={error} onRetry={refetch} />}
+
+            {error && coins.length > 0 && (
+              <p className="text-xs text-amber-600 px-1" role="status">
+                갱신 실패: {error} (아래는 마지막으로 받은 시세입니다)
+              </p>
+            )}
+
+            {isInitialLoading ? (
+              <Card className="overflow-hidden divide-y divide-slate-100">
+                {Array.from({ length: 10 }, (_, i) => <SkeletonRow key={i} />)}
+              </Card>
+            ) : shown.length === 0 && !loading ? (
+              isSearching ? <EmptyState query={query} /> : null
+            ) : (
+              <Card className="overflow-hidden">
+                <ListHeader />
+                <ul aria-live="polite">
+                  {shown.map((coin) => (
+                    <CoinRow key={coin.id} coin={coin} tick={ticks[coin.id]} />
+                  ))}
+                </ul>
+              </Card>
+            )}
+
+            {canLoadMore && !isInitialLoading && (
+              <div className="flex justify-center">
+                <Button variant="secondary" onClick={handleLoadMore} disabled={loading}>
+                  더 보기 (+{ROW_STEP}개)
+                </Button>
+              </div>
+            )}
+
+            <p className="text-center text-xs text-slate-400 pt-2">
+              데이터 제공: CoinGecko · 시세는 약 1분 주기로 갱신됩니다 · 투자 판단의 근거로 사용하지 마세요.
+            </p>
+          </div>
+        </main>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

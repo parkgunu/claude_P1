@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>마음쉼표 · AI 심리상담</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- 모든 CDN 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Noto Sans KR', 'system-ui', 'sans-serif'] },
+          keyframes: {
+            'fade-up': { '0%': { opacity: 0, transform: 'translateY(8px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
+            'blink':   { '0%,80%,100%': { opacity: .25 }, '40%': { opacity: 1 } },
+          },
+          animation: {
+            'fade-up': 'fade-up .28s ease-out both',
+            'blink': 'blink 1.2s infinite',
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현 불가한 부분만 */
+    .chat-scroll::-webkit-scrollbar { width: 8px; }
+    .chat-scroll::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 9999px; }
+    .chat-scroll::-webkit-scrollbar-track { background: transparent; }
+  </style>
+</head>
+<body class="bg-stone-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ========================================
+    // ⚙️ Config & Constants
+    // ========================================
+
+    // API 키는 브라우저에 존재하지 않는다. 모든 호출은 자체 서버(server.js)를 거친다.
+    const CHAT_ENDPOINT = '/api/chat';
+    const CONFIG_ENDPOINT = '/api/config';
+
+    // 서버 화이트리스트와 동일한 기본값. 실제 목록은 /api/config 로 갱신된다.
+    const MODELS = [
+      { id: 'gpt-4o-mini',  label: 'GPT-4o mini · 빠르고 저렴' },
+      { id: 'gpt-4o',       label: 'GPT-4o · 가장 깊이 있는 응답' },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini · 균형형' },
+    ];
+
+    const STORAGE = {
+      model: 'mindcare.model',
+      messages: 'mindcare.messages',
+    };
+
+    // 시스템 프롬프트(상담 태도·안전 수칙)는 server.js 가 소유한다.
+    // 클라이언트에 두면 사용자가 콘솔에서 지우거나 바꿔치기할 수 있기 때문이다.
+
+    const CRISIS_PATTERNS = [
+      '자살', '죽고 싶', '죽고싶', '죽어버리', '자해', '사라지고 싶',
+      '살기 싫', '살기싫', '없어지고 싶', '해치고 싶', '끝내고 싶',
+    ];
+
+    const QUICK_STARTERS = [
+      { emoji: '😔', title: '요즘 너무 우울해요', text: '요즘 이유 없이 계속 가라앉고 무기력해요. 뭘 해도 재미가 없어요.' },
+      { emoji: '😰', title: '불안이 심해요', text: '별일 아닌데도 가슴이 두근거리고 계속 최악의 상황이 떠올라요.' },
+      { emoji: '💼', title: '일이 버거워요', text: '회사에서 계속 압박을 받고 있어요. 제가 부족한 사람 같아서 힘들어요.' },
+      { emoji: '💬', title: '관계가 힘들어요', text: '가까운 사람과의 관계에서 자꾸 상처를 받아요. 어떻게 해야 할지 모르겠어요.' },
+      { emoji: '😴', title: '잠을 못 자요', text: '밤마다 생각이 꼬리를 물어서 잠들기가 힘들어요.' },
+      { emoji: '🫧', title: '그냥 얘기하고 싶어요', text: '특별한 이유는 없는데 누군가에게 마음을 털어놓고 싶어요.' },
+    ];
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+
+    const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+    const readStore = (key, fallback) => {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw === null ? fallback : JSON.parse(raw);
+      } catch (e) {
+        return fallback;
+      }
+    };
+
+    const writeStore = (key, value) => {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* 저장 불가 환경은 무시 */ }
+    };
+
+    const containsCrisis = (text) => CRISIS_PATTERNS.some((p) => text.includes(p));
+
+    const timeLabel = (ts) =>
+      new Date(ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+
+    // ========================================
+    // 📡 Chat Streaming Client (자체 서버 경유)
+    // ========================================
+
+    async function streamChatCompletion({ model, messages, onDelta, signal }) {
+      const res = await fetch(CHAT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // 모델·대화 기록만 보낸다. 온도·토큰 한도·시스템 프롬프트는 서버가 정한다.
+        body: JSON.stringify({ model, messages }),
+        signal,
+      });
+
+      if (!res.ok) {
+        // 서버는 항상 { success, message } 형태로 사람이 읽을 수 있는 사유를 준다.
+        let detail = '';
+        try {
+          const body = await res.json();
+          detail = body?.message || '';
+        } catch (e) { /* JSON 이 아닐 수 있음 */ }
+
+        throw new Error(detail || `요청에 실패했습니다. (HTTP ${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+
+          const payload = trimmed.slice(5).trim();
+          if (payload === '[DONE]') return;
+
+          try {
+            const chunk = JSON.parse(payload);
+            const delta = chunk?.choices?.[0]?.delta?.content;
+            if (delta) onDelta(delta);
+          } catch (e) { /* 잘린 청크는 건너뜀 */ }
+        }
+      }
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
+      const base = 'inline-flex items-center justify-center gap-1.5 font-medium rounded-xl transition-all ' +
+                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-teal-500 ' +
+                   'disabled:opacity-40 disabled:cursor-not-allowed';
+      const variants = {
+        primary:   'bg-teal-700 text-white hover:bg-teal-800 active:bg-teal-900 shadow-sm',
+        secondary: 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50 active:bg-stone-100',
+        danger:    'bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800',
+        ghost:     'bg-transparent text-stone-600 hover:bg-stone-200/70 active:bg-stone-300/70',
+      };
+      const sizes = { sm: 'text-xs px-2.5 py-1.5', md: 'text-sm px-4 py-2', lg: 'text-base px-5 py-3' };
+
+      return (
+        <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...props}>
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ label, error, className = '', id, ...props }) {
+      const inputId = id || `input-${label}`;
+      return (
+        <div className="w-full">
+          {label && (
+            <label htmlFor={inputId} className="block text-sm font-medium text-stone-700 mb-1.5">
+              {label}
+            </label>
+          )}
+          <input
+            id={inputId}
+            aria-invalid={!!error}
+            className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-stone-800 placeholder-stone-400
+              focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:border-teal-500 transition
+              disabled:bg-stone-100 disabled:text-stone-400
+              ${error ? 'border-rose-400' : 'border-stone-300'} ${className}`}
+            {...props}
+          />
+          {error && <p className="mt-1.5 text-xs text-rose-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Select({ label, options, className = '', id, ...props }) {
+      const selectId = id || `select-${label}`;
+      return (
+        <div className="w-full">
+          {label && (
+            <label htmlFor={selectId} className="block text-sm font-medium text-stone-700 mb-1.5">
+              {label}
+            </label>
+          )}
+          <select
+            id={selectId}
+            className={`w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm text-stone-800
+              focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:border-teal-500 transition ${className}`}
+            {...props}
+          >
+            {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <div className={`bg-white rounded-2xl shadow-sm border border-stone-200/80 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'neutral', className = '', children }) {
+      const tones = {
+        neutral: 'bg-stone-100 text-stone-600 border-stone-200',
+        teal: 'bg-teal-50 text-teal-700 border-teal-200',
+        rose: 'bg-rose-50 text-rose-700 border-rose-200',
+        amber: 'bg-amber-50 text-amber-700 border-amber-200',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => {
+          window.removeEventListener('keydown', onKey);
+          document.body.style.overflow = '';
+        };
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
+            className={`relative w-full ${sizes[size]} bg-white rounded-t-2xl sm:rounded-2xl shadow-xl animate-fade-up`}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-stone-200">
+              <h2 className="text-base font-bold text-stone-800">{title}</h2>
+              <button
+                onClick={onClose}
+                aria-label="닫기"
+                className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-600 transition"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-5 py-5">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common Components
+    // ========================================
+
+    function Header({ onOpenSettings, onReset, hasMessages }) {
+      return (
+        <header className="sticky top-0 z-30 bg-white/85 backdrop-blur border-b border-stone-200">
+          <div className="max-w-3xl mx-auto flex items-center gap-3 px-4 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-teal-700 text-lg text-white shadow-sm">
+              🌿
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-base font-bold text-stone-800">마음쉼표</h1>
+              <p className="truncate text-xs text-stone-500">언제든 편하게 이야기하세요</p>
+            </div>
+
+            {hasMessages && (
+              <Button variant="ghost" size="sm" onClick={onReset} title="새 상담 시작">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="hidden sm:inline">새 상담</span>
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={onOpenSettings} title="설정" aria-label="설정 열기">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.3 4.3a1 1 0 011-.8h1.4a1 1 0 011 .8l.2 1.2a6.5 6.5 0 011.5.9l1.1-.5a1 1 0 011.2.4l.7 1.2a1 1 0 01-.2 1.3l-.9.8a6.6 6.6 0 010 1.7l.9.8a1 1 0 01.2 1.3l-.7 1.2a1 1 0 01-1.2.4l-1.1-.5a6.5 6.5 0 01-1.5.9l-.2 1.2a1 1 0 01-1 .8h-1.4a1 1 0 01-1-.8l-.2-1.2a6.5 6.5 0 01-1.5-.9l-1.1.5a1 1 0 01-1.2-.4l-.7-1.2a1 1 0 01.2-1.3l.9-.8a6.6 6.6 0 010-1.7l-.9-.8a1 1 0 01-.2-1.3l.7-1.2a1 1 0 011.2-.4l1.1.5a6.5 6.5 0 011.5-.9l.2-1.2z" />
+                <circle cx="12" cy="12" r="2.5" />
+              </svg>
+            </Button>
+          </div>
+        </header>
+      );
+    }
+
+    function CrisisBanner({ onDismiss }) {
+      return (
+        <div role="alert" className="animate-fade-up rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3.5">
+          <div className="flex items-start gap-3">
+            <span className="text-lg leading-none" aria-hidden="true">🆘</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-rose-800">혼자 견디지 않으셔도 됩니다</p>
+              <p className="mt-1 text-xs leading-relaxed text-rose-700">
+                지금 많이 힘드신 것 같아요. 훈련받은 전문가와 24시간 이야기 나눌 수 있습니다.
+              </p>
+              <ul className="mt-2.5 space-y-1 text-xs font-medium text-rose-800">
+                <li>· 자살예방 상담전화 <a className="underline underline-offset-2" href="tel:109">109</a> (24시간)</li>
+                <li>· 정신건강 위기상담 <a className="underline underline-offset-2" href="tel:15770199">1577-0199</a></li>
+                <li>· 생명의전화 <a className="underline underline-offset-2" href="tel:15889191">1588-9191</a> / 청소년전화 <a className="underline underline-offset-2" href="tel:1388">1388</a></li>
+                <li>· 즉시 위험한 상황이라면 <a className="underline underline-offset-2" href="tel:119">119</a></li>
+              </ul>
+            </div>
+            <button
+              onClick={onDismiss}
+              aria-label="안내 닫기"
+              className="rounded-lg p-1 text-rose-400 transition hover:bg-rose-100 hover:text-rose-600"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    function TypingIndicator() {
+      return (
+        <div className="flex items-center gap-1 px-1 py-2" aria-label="상담사가 입력 중입니다">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="h-1.5 w-1.5 animate-blink rounded-full bg-stone-400"
+              style={{ animationDelay: `${i * 0.18}s` }}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    function MessageBubble({ message, streaming }) {
+      const isUser = message.role === 'user';
+
+      if (message.role === 'error') {
+        return (
+          <div className="animate-fade-up flex justify-center px-2">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs text-amber-800">
+              ⚠️ {message.content}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className={`animate-fade-up flex gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          {!isUser && (
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm">
+              🌿
+            </div>
+          )}
+          <div className={`flex max-w-[80%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+            <div
+              className={`whitespace-pre-wrap break-words px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                isUser
+                  ? 'rounded-2xl rounded-br-md bg-teal-700 text-white'
+                  : 'rounded-2xl rounded-bl-md border border-stone-200 bg-white text-stone-700'
+              }`}
+            >
+              {message.content}
+              {streaming && !message.content && <TypingIndicator />}
+              {streaming && message.content && (
+                <span className="ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-blink rounded-sm bg-stone-400" />
+              )}
+            </div>
+            {!streaming && message.createdAt && (
+              <span className="mt-1 px-1 text-[11px] text-stone-400">{timeLabel(message.createdAt)}</span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function EmptyState({ onPick }) {
+      return (
+        <div className="animate-fade-up py-6">
+          <div className="text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-teal-700 text-3xl shadow-sm">
+              🌿
+            </div>
+            <h2 className="mt-4 text-lg font-bold text-stone-800">어떤 마음을 나누고 싶으신가요?</h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-stone-500">
+              무엇이든 편하게 이야기해 주세요.<br className="sm:hidden" /> 판단하지 않고 끝까지 듣겠습니다.
+            </p>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {QUICK_STARTERS.map((s) => (
+              <button
+                key={s.title}
+                onClick={() => onPick(s.text)}
+                className="group flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-3.5 text-left
+                  transition hover:border-teal-300 hover:bg-teal-50/50 hover:shadow-sm
+                  focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+              >
+                <span className="text-xl leading-none" aria-hidden="true">{s.emoji}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-stone-800">{s.title}</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-stone-500">{s.text}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <p className="mt-6 rounded-xl bg-stone-200/60 px-4 py-3 text-[11px] leading-relaxed text-stone-500">
+            본 서비스는 AI 기반 대화 도우미로, 전문 의료·심리 상담을 대체하지 않습니다.
+            지속되는 어려움은 정신건강의학과 또는 전문 상담기관에 도움을 요청해 주세요.
+          </p>
+        </div>
+      );
+    }
+
+    function Composer({ value, onChange, onSend, onStop, loading, disabled }) {
+      const textareaRef = useRef(null);
+
+      useEffect(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+      }, [value]);
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          onSend();
+        }
+      };
+
+      return (
+        <div className="border-t border-stone-200 bg-white/90 backdrop-blur">
+          <div className="mx-auto max-w-3xl px-4 py-3">
+            <div className="flex items-end gap-2 rounded-2xl border border-stone-300 bg-white p-2 shadow-sm
+                            transition focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500/25">
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={disabled}
+                aria-label="상담 내용 입력"
+                placeholder={disabled ? '서버 준비 중입니다' : '지금 어떤 마음이신가요?  (Shift + Enter 줄바꿈)'}
+                className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed
+                           text-stone-800 placeholder-stone-400 focus:outline-none disabled:cursor-not-allowed"
+              />
+              {loading ? (
+                <Button variant="secondary" size="md" onClick={onStop} className="shrink-0" title="응답 중단">
+                  <span className="h-3 w-3 rounded-sm bg-stone-600" />
+                  <span className="hidden sm:inline">중단</span>
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={onSend}
+                  disabled={disabled || !value.trim()}
+                  className="shrink-0"
+                  aria-label="전송"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </Button>
+              )}
+            </div>
+            <p className="mt-2 text-center text-[11px] text-stone-400">
+              AI 상담 도우미이며 전문 진료를 대체하지 않습니다 · 위기 시 <span className="font-medium text-stone-500">109</span>
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    function SettingsModal({ isOpen, onClose, model, models, onSave }) {
+      const [draftModel, setDraftModel] = useState(model);
+
+      useEffect(() => {
+        if (isOpen) setDraftModel(model);
+      }, [isOpen, model]);
+
+      const handleSave = () => {
+        onSave({ model: draftModel });
+        onClose();
+      };
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="설정">
+          <div className="space-y-5">
+            <Select
+              label="모델"
+              options={models}
+              value={draftModel}
+              onChange={(e) => setDraftModel(e.target.value)}
+            />
+
+            <div className="rounded-xl border border-teal-200 bg-teal-50 px-3.5 py-3">
+              <p className="text-xs font-semibold text-teal-800">🔒 보안 안내</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-teal-700">
+                이 앱은 OpenAI를 직접 호출하지 않고 <strong className="font-semibold">자체 서버를 거칩니다</strong>.
+                API 키는 서버 환경변수에만 존재하며 브라우저로 전달되지 않습니다.
+                대화 내용은 이 브라우저의 localStorage 에만 저장됩니다.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="secondary" onClick={onClose}>취소</Button>
+              <Button variant="primary" onClick={handleSave}>저장</Button>
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Component
+    // ========================================
+
+    function CounselorChat() {
+      const [models, setModels] = useState(MODELS);
+      const [serverReady, setServerReady] = useState(true); // 확인 전에는 입력창을 막지 않는다
+      const [model, setModel] = useState(() => readStore(STORAGE.model, MODELS[0].id));
+      const [messages, setMessages] = useState(() => readStore(STORAGE.messages, []));
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [streamText, setStreamText] = useState('');
+      const [showCrisis, setShowCrisis] = useState(false);
+      const [settingsOpen, setSettingsOpen] = useState(false);
+
+      const abortRef = useRef(null);
+      const bottomRef = useRef(null);
+
+      // 서버가 키를 갖고 있는지, 어떤 모델을 허용하는지 부팅 시 한 번 확인한다.
+      useEffect(() => {
+        let alive = true;
+        fetch(CONFIG_ENDPOINT)
+          .then((r) => r.json())
+          .then((body) => {
+            if (!alive || !body?.success) return;
+            const list = body.data?.models;
+            if (Array.isArray(list) && list.length) {
+              setModels(list);
+              setModel((cur) => (list.some((m) => m.id === cur) ? cur : body.data.defaultModel || list[0].id));
+            }
+            setServerReady(Boolean(body.data?.ready));
+          })
+          .catch(() => { /* 설정 조회 실패는 전송 시 에러로 드러난다 */ });
+        return () => { alive = false; };
+      }, []);
+
+      // 상태 영속화
+      useEffect(() => { writeStore(STORAGE.model, model); }, [model]);
+      useEffect(() => { writeStore(STORAGE.messages, messages); }, [messages]);
+
+      // 새 메시지·스트리밍마다 자동 스크롤
+      useEffect(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, [messages, streamText, showCrisis]);
+
+      // 언마운트 시 진행 중 요청 정리
+      useEffect(() => () => abortRef.current?.abort(), []);
+
+      const historyForApi = useCallback((list) => {
+        // 에러 메시지는 제외하고 최근 20턴만 전송. 시스템 프롬프트는 서버가 붙인다.
+        const clean = list.filter((m) => m.role === 'user' || m.role === 'assistant').slice(-20);
+        return clean.map(({ role, content }) => ({ role, content }));
+      }, []);
+
+      const sendMessage = useCallback(async (rawText) => {
+        const text = (typeof rawText === 'string' ? rawText : input).trim();
+        if (!text || loading || !serverReady) return;
+
+        if (containsCrisis(text)) setShowCrisis(true);
+
+        const userMessage = { id: uid(), role: 'user', content: text, createdAt: Date.now() };
+        const nextMessages = [...messages, userMessage];
+
+        setMessages(nextMessages);
+        setInput('');
+        setLoading(true);
+        setStreamText('');
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        let acc = '';
+        try {
+          await streamChatCompletion({
+            model,
+            messages: historyForApi(nextMessages),
+            signal: controller.signal,
+            onDelta: (delta) => {
+              acc += delta;
+              setStreamText(acc);
+            },
+          });
+
+          if (acc.trim()) {
+            setMessages((prev) => [...prev, { id: uid(), role: 'assistant', content: acc, createdAt: Date.now() }]);
+          }
+        } catch (err) {
+          if (err.name === 'AbortError') {
+            // 사용자가 직접 중단 — 여기까지 받은 내용은 보존
+            if (acc.trim()) {
+              setMessages((prev) => [...prev, { id: uid(), role: 'assistant', content: acc, createdAt: Date.now() }]);
+            }
+          } else {
+            const message = err instanceof TypeError
+              ? '네트워크에 연결할 수 없습니다. 인터넷 상태를 확인해 주세요.'
+              : err.message;
+            setMessages((prev) => [...prev, { id: uid(), role: 'error', content: message, createdAt: Date.now() }]);
+          }
+        } finally {
+          setStreamText('');
+          setLoading(false);
+          abortRef.current = null;
+        }
+      }, [input, loading, serverReady, messages, model, historyForApi]);
+
+      const handleStop = useCallback(() => abortRef.current?.abort(), []);
+
+      const handleReset = useCallback(() => {
+        if (messages.length && !window.confirm('지금까지의 대화를 지우고 새 상담을 시작할까요?')) return;
+        abortRef.current?.abort();
+        setMessages([]);
+        setStreamText('');
+        setShowCrisis(false);
+        setInput('');
+      }, [messages.length]);
+
+      const streamingMessage = useMemo(
+        () => (loading ? { id: '__streaming', role: 'assistant', content: streamText } : null),
+        [loading, streamText]
+      );
+
+      return (
+        <div className="flex h-[100dvh] flex-col bg-stone-100">
+          <Header
+            onOpenSettings={() => setSettingsOpen(true)}
+            onReset={handleReset}
+            hasMessages={messages.length > 0}
+          />
+
+          <main className="chat-scroll flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-3xl space-y-4 px-4 py-5">
+              {!serverReady && (
+                <Card className="border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-semibold text-amber-800">서버 설정이 필요합니다</p>
+                  <p className="mt-0.5 text-xs text-amber-700">
+                    서버에 OPENAI_API_KEY 환경변수가 없습니다. .env 파일에 키를 넣고 서버를 다시 시작해 주세요.
+                  </p>
+                </Card>
+              )}
+
+              {showCrisis && <CrisisBanner onDismiss={() => setShowCrisis(false)} />}
+
+              {messages.length === 0 && !loading ? (
+                <EmptyState onPick={(text) => sendMessage(text)} />
+              ) : (
+                <React.Fragment>
+                  <div className="flex justify-center">
+                    <Badge tone="teal">🔒 대화는 이 브라우저에만 저장됩니다</Badge>
+                  </div>
+                  {messages.map((m) => <MessageBubble key={m.id} message={m} />)}
+                  {streamingMessage && <MessageBubble message={streamingMessage} streaming />}
+                </React.Fragment>
+              )}
+
+              <div ref={bottomRef} />
+            </div>
+          </main>
+
+          <Composer
+            value={input}
+            onChange={setInput}
+            onSend={() => sendMessage()}
+            onStop={handleStop}
+            loading={loading}
+            disabled={!serverReady}
+          />
+
+          <SettingsModal
+            isOpen={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            model={model}
+            models={models}
+            onSave={({ model: m }) => setModel(m)}
+          />
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+
+    function App() {
+      return <CounselorChat />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

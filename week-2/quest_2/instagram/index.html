@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>저장되는 식단 콘텐츠 공식</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap">
+<style>
+:root{
+  --paper:#F5F4F0;
+  --surface:#FFFFFF;
+  --surface-sunk:#EDEDE6;
+  --ink:#1B211D;
+  --ink-soft:#4A544E;
+  --muted:#79837C;
+  --line:#DDDDD5;
+  --line-soft:#E9E9E1;
+  --teal:#16645A;
+  --teal-soft:#CFE3DE;
+  --amber:#C6701F;
+  --amber-soft:#F1DEC6;
+  --crit:#A33B2A;
+  --shadow:0 1px 2px rgba(27,33,29,.06),0 8px 24px -16px rgba(27,33,29,.28);
+  --display:"Gowun Batang",Georgia,"Nanum Myeongjo",serif;
+  --body:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+  --mono:"IBM Plex Mono","D2Coding",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#151A17;
+    --surface:#1D2320;
+    --surface-sunk:#242B27;
+    --ink:#ECEFE9;
+    --ink-soft:#BAC3BC;
+    --muted:#8A948C;
+    --line:#333B36;
+    --line-soft:#2A322D;
+    --teal:#5DC0AB;
+    --teal-soft:#23443E;
+    --amber:#E0A05C;
+    --amber-soft:#3E3223;
+    --crit:#DE8878;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#151A17;
+  --surface:#1D2320;
+  --surface-sunk:#242B27;
+  --ink:#ECEFE9;
+  --ink-soft:#BAC3BC;
+  --muted:#8A948C;
+  --line:#333B36;
+  --line-soft:#2A322D;
+  --teal:#5DC0AB;
+  --teal-soft:#23443E;
+  --amber:#E0A05C;
+  --amber-soft:#3E3223;
+  --crit:#DE8878;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+img{max-width:100%}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--body);
+  font-weight:400;
+  font-size:16px;
+  line-height:1.7;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1040px;margin:0 auto;padding:56px 24px 80px}
+@media(max-width:640px){.wrap{padding:32px 16px 56px}}
+
+.eyebrow{
+  font-family:var(--mono);
+  font-size:11px;
+  font-weight:500;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin:0;
+}
+h1{
+  font-family:var(--display);
+  font-weight:700;
+  font-size:clamp(30px,5vw,46px);
+  line-height:1.24;
+  letter-spacing:-.01em;
+  text-wrap:balance;
+  margin:10px 0 0;
+}
+.dek{
+  max-width:60ch;
+  color:var(--ink-soft);
+  font-size:16.5px;
+  font-weight:300;
+  margin:14px 0 0;
+}
+h2{
+  font-family:var(--display);
+  font-weight:700;
+  font-size:clamp(21px,3vw,27px);
+  line-height:1.3;
+  margin:0;
+  text-wrap:balance;
+}
+
+header.head{border-bottom:2px solid var(--ink);padding-bottom:26px}
+.meta{
+  display:flex;flex-wrap:wrap;gap:0;
+  margin:26px 0 0;
+  border:1px solid var(--line);
+  border-radius:3px;
+  background:var(--surface);
+  overflow:hidden;
+}
+.meta div{
+  flex:1 1 130px;
+  padding:12px 16px;
+  border-right:1px solid var(--line-soft);
+}
+.meta div:last-child{border-right:0}
+.meta dt{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);margin:0;
+}
+.meta dd{
+  margin:3px 0 0;font-family:var(--mono);font-size:19px;font-weight:500;
+  font-variant-numeric:tabular-nums;color:var(--ink);
+}
+.meta dd small{font-family:var(--body);font-size:12px;font-weight:400;color:var(--muted);margin-left:3px}
+
+section{margin-top:64px}
+.sec-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.sec-note{color:var(--ink-soft);font-size:14.5px;font-weight:300;max-width:62ch;margin:8px 0 26px}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+thead th{
+  font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);text-align:left;
+  padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+thead th.num{text-align:right}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr.top td{background:var(--surface-sunk)}
+.rank{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;width:34px}
+.topic{font-weight:500;line-height:1.45;min-width:220px}
+.topic span{display:block;font-weight:400;font-size:12.5px;color:var(--muted);margin-top:2px}
+.fmt{white-space:nowrap;font-size:12.5px;color:var(--ink-soft)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.bar-cell{width:230px;min-width:190px}
+.bar-track{position:relative;height:9px;background:var(--surface-sunk);border-radius:1px}
+.bar-fill{position:absolute;top:0;bottom:0;left:0;background:var(--teal);border-radius:1px}
+tbody tr.top .bar-track{background:var(--line-soft)}
+tbody tr.top .bar-fill{background:var(--amber)}
+.bar-median{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--crit)}
+.bar-val{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;margin-top:4px;display:block;color:var(--ink-soft)}
+.legend{display:flex;gap:20px;flex-wrap:wrap;margin:12px 0 0;font-size:12px;color:var(--muted);font-family:var(--mono)}
+.legend i{display:inline-block;width:18px;height:8px;border-radius:1px;vertical-align:middle;margin-right:6px}
+.legend i.l-med{width:2px;height:12px;background:var(--crit)}
+
+.formulas{display:grid;gap:18px}
+.formula{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:3px;
+  padding:24px 26px;
+  display:grid;
+  grid-template-columns:1fr 250px;
+  gap:26px;
+  box-shadow:var(--shadow);
+}
+@media(max-width:760px){.formula{grid-template-columns:1fr;gap:18px;padding:20px}}
+.formula .tag{
+  font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--teal);font-weight:600;margin:0;
+}
+.formula h2{margin:8px 0 10px;font-size:clamp(19px,2.6vw,23px)}
+.formula p.txt{margin:0 0 12px;color:var(--ink-soft);font-size:14.8px;font-weight:300;max-width:58ch}
+.formula p.txt:last-child{margin-bottom:0}
+.formula b{font-weight:600;color:var(--ink)}
+.evidence{
+  background:var(--surface-sunk);
+  border-radius:3px;
+  padding:16px 18px;
+  align-self:start;
+}
+.ev-label{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);display:block;margin-bottom:10px;
+}
+.evidence ul{margin:0;padding:0;list-style:none;display:grid;gap:9px}
+.evidence li{display:flex;justify-content:space-between;gap:10px;font-size:12.8px;line-height:1.4;align-items:baseline}
+.evidence li span:first-child{color:var(--ink-soft)}
+.evidence li span:last-child{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:500;white-space:nowrap}
+.ev-gap{margin:12px 0 0;padding-top:12px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--amber);font-weight:500;line-height:1.7}
+
+.briefs{display:grid;gap:22px}
+.brief{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:3px;
+  overflow:hidden;
+  box-shadow:var(--shadow);
+}
+.brief-top{
+  padding:22px 26px 20px;
+  border-bottom:1px solid var(--line);
+  display:flex;gap:20px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;
+}
+@media(max-width:640px){.brief-top{padding:18px}}
+.brief-title{flex:1 1 320px;min-width:0}
+.brief-title .code{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);margin:0;
+}
+.brief-title h2{margin:7px 0 0;font-size:clamp(20px,2.7vw,25px)}
+.goal{margin:9px 0 0;font-size:14px;color:var(--ink-soft);font-weight:300;max-width:54ch;line-height:1.6}
+.applied{display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:0 0 auto;padding-top:4px}
+.chip{
+  font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.04em;
+  padding:4px 9px;border-radius:2px;background:var(--teal-soft);color:var(--teal);white-space:nowrap;
+}
+.chip.amber{background:var(--amber-soft);color:var(--amber)}
+.brief-body{display:grid;grid-template-columns:1.35fr 1fr;gap:0}
+@media(max-width:760px){.brief-body{grid-template-columns:1fr}}
+.brief-col{padding:22px 26px}
+@media(max-width:640px){.brief-col{padding:18px}}
+.brief-col+.brief-col{border-left:1px solid var(--line-soft)}
+@media(max-width:760px){.brief-col+.brief-col{border-left:0;border-top:1px solid var(--line-soft)}}
+.field{margin-bottom:22px}
+.field:last-child{margin-bottom:0}
+.field-label{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);display:block;margin-bottom:8px;
+}
+.hook{
+  font-family:var(--display);font-size:19px;line-height:1.45;font-weight:700;
+  margin:0;color:var(--ink);text-wrap:balance;
+}
+.hook em{font-style:normal;color:var(--amber)}
+.slides{margin:0;padding:0;list-style:none;counter-reset:s;display:grid;gap:9px}
+.slides li{
+  position:relative;
+  padding-left:34px;
+  font-size:14px;line-height:1.55;color:var(--ink-soft);
+  word-break:keep-all;
+}
+.slides li::before{
+  position:absolute;left:0;top:0;
+  counter-increment:s;content:counter(s,decimal-leading-zero);
+  font-family:var(--mono);font-size:11px;line-height:1.95;
+  color:var(--muted);font-weight:500;
+}
+.slides li b{color:var(--ink);font-weight:600}
+.caption-box{
+  background:var(--surface-sunk);border-radius:3px;padding:14px 16px;
+  font-size:14px;line-height:1.7;color:var(--ink-soft);white-space:pre-line;
+}
+.tags{font-family:var(--mono);font-size:12.5px;color:var(--teal);word-break:keep-all;line-height:1.9;margin:0}
+.kpi{display:grid;gap:0;border:1px solid var(--line-soft);border-radius:3px;overflow:hidden}
+.kpi div{display:flex;justify-content:space-between;gap:12px;padding:9px 14px;font-size:13.5px;border-bottom:1px solid var(--line-soft)}
+.kpi div:last-child{border-bottom:0}
+.kpi span:first-child{color:var(--muted)}
+.kpi span:last-child{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums;color:var(--ink)}
+.note{margin:0;font-size:13.5px;color:var(--ink-soft);font-weight:300;line-height:1.6}
+.note b{font-weight:600;color:var(--ink)}
+
+footer{
+  margin-top:64px;padding-top:22px;border-top:1px solid var(--line);
+  font-size:13px;color:var(--muted);font-weight:300;line-height:1.75;max-width:72ch;
+}
+footer b{font-weight:600;color:var(--ink-soft)}
+footer ul{margin:10px 0 0;padding-left:18px}
+footer li{margin-bottom:6px}
+a{color:var(--teal)}
+a:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head">
+  <p class="eyebrow">벤치마크 분석 · @recipe_ing</p>
+  <h1>저장되는 식단 콘텐츠 공식</h1>
+  <p class="dek">팔로워 9.7만 레시피 계정의 최근 게시물 15개를 좋아요·댓글·주제·포맷으로 해부해, 반응이 갈린 지점을 공식 3개로 뽑고 식습관·체중조절·운동 주제에 그대로 이식한 기획안입니다.</p>
+  <dl class="meta">
+    <div><dt>표본</dt><dd>15<small>개 게시물</small></dd></div>
+    <div><dt>평균 좋아요</dt><dd>1,994</dd></div>
+    <div><dt>중앙값</dt><dd>583</dd></div>
+    <div><dt>최고 / 최저</dt><dd>12,000<small>/ 68</small></dd></div>
+    <div><dt>수집일</dt><dd>2026.09.08</dd></div>
+  </dl>
+</header>
+
+<section>
+  <div class="sec-head">
+    <p class="eyebrow">01 — 원자료</p>
+    <h2>게시물 15개 성과표</h2>
+  </div>
+  <p class="sec-note">최신순. 상단 고정 게시물 2개는 게시일이 달라 표본에서 제외했습니다. 주황 막대는 상위 5개, 붉은 세로선은 중앙값 583입니다.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>주제</th>
+          <th>포맷</th>
+          <th class="bar-cell">좋아요</th>
+          <th class="num">댓글</th>
+          <th class="num">댓글률</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="rank">01</td>
+          <td class="topic">일주일 식단표 · 어린이 아침 + 12재료 돌려쓰기<span>주간 시리즈</span></td>
+          <td class="fmt">캐러셀</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:2.8%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">340</span></td>
+          <td class="num">20</td>
+          <td class="num">5.9%</td>
+        </tr>
+        <tr>
+          <td class="rank">02</td>
+          <td class="topic">영유아 9월 아침 달력<span>요청 대응 콘텐츠</span></td>
+          <td class="fmt">한 장 달력</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:0.6%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">68</span></td>
+          <td class="num">10</td>
+          <td class="num">14.7%</td>
+        </tr>
+        <tr class="top">
+          <td class="rank">03</td>
+          <td class="topic">9월 어린이 아침 달력 · 한 달치<span>DM 파일 배포 훅</span></td>
+          <td class="fmt">한 장 달력</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:17.1%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">2,055</span></td>
+          <td class="num">180</td>
+          <td class="num">8.8%</td>
+        </tr>
+        <tr class="top">
+          <td class="rank">04</td>
+          <td class="topic">아침국 25가지 · 2인분 양념 공식<span>계량 기준표</span></td>
+          <td class="fmt">한 장 표</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:100%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">약 12,000</span></td>
+          <td class="num">80</td>
+          <td class="num">0.7%</td>
+        </tr>
+        <tr>
+          <td class="rank">05</td>
+          <td class="topic">탄단지 아침 × 일주일 식단표<span>주간 시리즈</span></td>
+          <td class="fmt">캐러셀</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:14.0%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">1,675</span></td>
+          <td class="num">61</td>
+          <td class="num">3.6%</td>
+        </tr>
+        <tr>
+          <td class="rank">06</td>
+          <td class="topic">어린이 아침 달력 상세 레시피<span>부록 콘텐츠</span></td>
+          <td class="fmt">캐러셀</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:3.4%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">403</span></td>
+          <td class="num">8</td>
+          <td class="num">2.0%</td>
+        </tr>
+        <tr>
+          <td class="rank">07</td>
+          <td class="topic">영양제 시간표 BEST 9<span>건강 정보</span></td>
+          <td class="fmt">한 장 차트</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:2.3%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">278</span></td>
+          <td class="num">5</td>
+          <td class="num">1.8%</td>
+        </tr>
+        <tr class="top">
+          <td class="rank">08</td>
+          <td class="topic">키 성장 아침식단 × 일주일 식단표<span>댓글로 재료 요청 반영</span></td>
+          <td class="fmt">캐러셀</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:30.9%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">3,706</span></td>
+          <td class="num">276</td>
+          <td class="num">7.4%</td>
+        </tr>
+        <tr>
+          <td class="rank">09</td>
+          <td class="topic">스무디 × 12재료 일주일 식단표<span>주간 시리즈</span></td>
+          <td class="fmt">캐러셀</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:1.5%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">178</span></td>
+          <td class="num">2</td>
+          <td class="num">1.1%</td>
+        </tr>
+        <tr>
+          <td class="rank">10</td>
+          <td class="topic">딱 12재료로 집밥 메뉴 20<span>주간 시리즈</span></td>
+          <td class="fmt">한 장 표</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:1.6%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">193</span></td>
+          <td class="num">4</td>
+          <td class="num">2.1%</td>
+        </tr>
+        <tr class="top">
+          <td class="rank">11</td>
+          <td class="topic">코팅 프라이팬 티어표 · 소비자원<span>구매 결정 기준</span></td>
+          <td class="fmt">티어표</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:40.3%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">4,833</span></td>
+          <td class="num">167</td>
+          <td class="num">3.5%</td>
+        </tr>
+        <tr class="top">
+          <td class="rank">12</td>
+          <td class="topic">나폴리피자협회 인증 맛집 14<span>공신력 인용</span></td>
+          <td class="fmt">리스트 인포그래픽</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:18.8%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">2,261</span></td>
+          <td class="num">26</td>
+          <td class="num">1.2%</td>
+        </tr>
+        <tr>
+          <td class="rank">13</td>
+          <td class="topic">저탄수 반전음식 BEST 9<span>다이어트</span></td>
+          <td class="fmt">3×3 그리드</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:4.0%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">482</span></td>
+          <td class="num">5</td>
+          <td class="num">1.0%</td>
+        </tr>
+        <tr>
+          <td class="rank">14</td>
+          <td class="topic">시간대별 체지방 법칙<span>다이어트</span></td>
+          <td class="fmt">원형 시간표</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:4.9%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">583</span></td>
+          <td class="num">2</td>
+          <td class="num">0.3%</td>
+        </tr>
+        <tr>
+          <td class="rank">15</td>
+          <td class="topic">전국 10대 짬뽕 맛집<span>지역 논쟁 유발</span></td>
+          <td class="fmt">지도 인포그래픽</td>
+          <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:7.1%"></div><div class="bar-median" style="left:4.9%"></div></div><span class="bar-val">854</span></td>
+          <td class="num">70</td>
+          <td class="num">8.2%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="legend">
+    <span><i style="background:var(--amber)"></i>상위 5개</span>
+    <span><i style="background:var(--teal)"></i>그 외</span>
+    <span><i class="l-med"></i>중앙값 583</span>
+    <span>댓글률 = 댓글 ÷ 좋아요</span>
+  </p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="eyebrow">02 — 도출</p>
+    <h2>반응이 좋은 게시물의 공통점 셋</h2>
+  </div>
+  <p class="sec-note">상위 5개 평균 4,971 좋아요, 하위 5개 평균 211. 23배 차이를 만든 변수는 주제의 매력도가 아니라 아래 세 가지였습니다.</p>
+
+  <div class="formulas">
+
+    <article class="formula">
+      <div>
+        <p class="tag">공식 1</p>
+        <h2>제목에서 범위를 숫자로 못 박는다</h2>
+        <p class="txt">상위 5개는 예외 없이 <b>개수나 등급이 제목에 박혀</b> 있습니다. 25가지 · 티어표 · 14곳 · 한 달치. 읽기도 전에 "저장하면 무엇이 몇 개 해결되는지"가 계산됩니다.</p>
+        <p class="txt">반대로 하위 5개는 전부 <b>범위가 열린 시리즈물</b>입니다. "일주일 식단표"는 정보량이 훨씬 많은데도 몇 번째인지, 지난주와 뭐가 다른지 제목만으로는 알 수 없어 스크롤이 멈추지 않습니다.</p>
+      </div>
+      <aside class="evidence">
+        <span class="ev-label">근거 · 좋아요</span>
+        <ul>
+          <li><span>아침국 25가지</span><span>12,000</span></li>
+          <li><span>프라이팬 티어표</span><span>4,833</span></li>
+          <li><span>피자 맛집 14곳</span><span>2,261</span></li>
+          <li><span>스무디 일주일 식단표</span><span>178</span></li>
+          <li><span>집밥 메뉴 20 · 시리즈</span><span>193</span></li>
+        </ul>
+        <p class="ev-gap">숫자 명시 → 평균 6,365<br>범위 미명시 → 평균 186</p>
+      </aside>
+    </article>
+
+    <article class="formula">
+      <div>
+        <p class="tag">공식 2</p>
+        <h2>레시피가 아니라 판단 기준을 판다</h2>
+        <p class="txt">1위 아침국은 국 끓이는 법이 아니라 <b>국간장 몇 숟갈인지</b>를 정리했고, 2위 프라이팬은 요리법이 아니라 <b>뭘 사야 하는지</b>를 정해줍니다. 짬뽕·피자 지도는 <b>어디로 갈지</b>를 대신 고릅니다.</p>
+        <p class="txt">공통점은 전부 <b>매번 다시 검색하게 되는 반복 결정</b>이라는 것. 한 번 저장하면 계속 꺼내 보게 되니 저장 → 재노출 → 도달 확대로 이어집니다. 정보량이 많은 식단표가 밀린 이유도 여기 있습니다. 읽을거리는 주지만 결정을 대신 내려주지는 않습니다.</p>
+      </div>
+      <aside class="evidence">
+        <span class="ev-label">근거 · 좋아요</span>
+        <ul>
+          <li><span>계량 기준 · 양념 공식</span><span>12,000</span></li>
+          <li><span>구매 기준 · 티어표</span><span>4,833</span></li>
+          <li><span>장소 기준 · 맛집 지도</span><span>2,261</span></li>
+          <li><span>읽을거리 · 영양제 시간표</span><span>278</span></li>
+          <li><span>읽을거리 · 체지방 법칙</span><span>583</span></li>
+        </ul>
+        <p class="ev-gap">결정형 → 평균 6,365<br>정보형 → 평균 431</p>
+      </aside>
+    </article>
+
+    <article class="formula">
+      <div>
+        <p class="tag">공식 3</p>
+        <h2>댓글은 내 조건을 말할 자리가 있을 때 터진다</h2>
+        <p class="txt">댓글 1~3위는 전부 <b>독자가 자기 상황을 적을 이유</b>를 만들어 뒀습니다. 키 성장 식단은 "원하는 재료를 댓글로 주면 다음 주에 반영", 어린이 달력은 "DM 주시면 파일 보내드려요", 짬뽕 지도는 지역 자랑을 부릅니다.</p>
+        <p class="txt">주목할 건 <b>좋아요 1위가 댓글률 꼴찌</b>(0.7%)라는 점입니다. 저장은 혼자 하는 행동이고, 댓글은 말 걸 구실이 있어야 나옵니다. 하나의 게시물로 둘 다 노리기보다 <b>저장형과 댓글형을 나눠 발행</b>하는 편이 낫습니다.</p>
+      </div>
+      <aside class="evidence">
+        <span class="ev-label">근거 · 댓글</span>
+        <ul>
+          <li><span>키 성장 식단 · 재료 요청</span><span>276</span></li>
+          <li><span>어린이 달력 · DM 파일</span><span>180</span></li>
+          <li><span>프라이팬 · 제품 논쟁</span><span>167</span></li>
+          <li><span>짬뽕 지도 · 지역 자랑</span><span>70</span></li>
+          <li><span>체지방 법칙 · 훅 없음</span><span>2</span></li>
+        </ul>
+        <p class="ev-gap">참여 훅 있음 → 평균 173<br>훅 없음 → 평균 5</p>
+      </aside>
+    </article>
+
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="eyebrow">03 — 적용</p>
+    <h2>내 주제로 옮긴 콘텐츠 기획안 3</h2>
+  </div>
+  <p class="sec-note">식습관 · 체중조절 · 운동 · 식단에 위 공식을 이식했습니다. 저장형 2건과 댓글형 1건으로 역할을 나눠 한 주에 하나씩 발행하는 구성입니다.</p>
+
+  <div class="briefs">
+
+    <article class="brief">
+      <div class="brief-top">
+        <div class="brief-title">
+          <p class="code">기획안 A · 저장형</p>
+          <h2>단백질 가성비 티어표 24</h2>
+          <p class="goal">프라이팬 티어표(4,833)를 그대로 이식. 마트에서 실제로 살 수 있는 단백질 식품 24종을 100원당 단백질 g으로 줄 세워 "뭘 사야 하나"를 끝냅니다.</p>
+        </div>
+        <div class="applied">
+          <span class="chip">공식 1 · 숫자 24</span>
+          <span class="chip">공식 2 · 구매 결정</span>
+        </div>
+      </div>
+      <div class="brief-body">
+        <div class="brief-col">
+          <div class="field">
+            <span class="field-label">첫 장 후킹 문구</span>
+            <p class="hook">닭가슴살만 사면 손해입니다<br><em>100원당 단백질</em> 티어표 24</p>
+          </div>
+          <div class="field">
+            <span class="field-label">구성 · 캐러셀 4장</span>
+            <ol class="slides">
+              <li><b>티어표 한 장</b> — S/A/B/C 4단계 × 24종. 각 칸에 100g당 단백질 g, kcal, 100원당 단백질 g</li>
+              <li><b>S티어 6종 상세</b> — 실제 마트 가격, 조리 손실률, 보관 기간</li>
+              <li><b>함정 구간</b> — 단백질 표기는 높은데 지방·나트륨이 같이 오는 품목(가공육, 치즈류)</li>
+              <li><b>티어 산정 기준</b> — 가격 조사 시점과 기준 마트를 명시해 신뢰 확보</li>
+            </ol>
+          </div>
+          <div class="field">
+            <span class="field-label">캡션 · CTA</span>
+            <div class="caption-box">단백질 1g을 가장 싸게 먹는 방법을 24종으로 줄 세웠어요.
+
+가격은 대형마트 기준이고, 조리하면 무게가 줄어드는 손실률까지 반영했습니다.
+
+👉 장 보기 전에 저장해두고 하나씩 담아보세요!</div>
+          </div>
+        </div>
+        <div class="brief-col">
+          <div class="field">
+            <span class="field-label">해시태그</span>
+            <p class="tags">#단백질 #고단백식단 #식단관리 #다이어트식단 #체중조절 #장보기리스트 #가성비식단</p>
+          </div>
+          <div class="field">
+            <span class="field-label">역할 · 목표</span>
+            <div class="kpi">
+              <div><span>1순위 지표</span><span>저장</span></div>
+              <div><span>좋아요 목표</span><span>2,000+</span></div>
+              <div><span>댓글 기대</span><span>낮음 · 1~3%</span></div>
+              <div><span>제작 난이도</span><span>상 · 가격 조사</span></div>
+              <div><span>발행 순서</span><span>1주차</span></div>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">성립 조건</span>
+            <p class="note">가격 데이터가 근거의 전부이므로 <b>조사 시점과 마트를 반드시 표기</b>해야 합니다. 이게 빠지면 티어표가 아니라 개인 취향 목록으로 읽힙니다.</p>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article class="brief">
+      <div class="brief-top">
+        <div class="brief-title">
+          <p class="code">기획안 B · 댓글형</p>
+          <h2>정체기 탈출 4주 달력</h2>
+          <p class="goal">키 성장 식단(댓글 276)과 한 달 달력(댓글 180)의 결합. 하루 한 칸에 식사 과제와 운동 과제를 하나씩만 두고, 유형을 댓글로 받아 맞춤 버전을 발행합니다.</p>
+        </div>
+        <div class="applied">
+          <span class="chip">공식 1 · 4주 28칸</span>
+          <span class="chip amber">공식 3 · 참여 훅</span>
+        </div>
+      </div>
+      <div class="brief-body">
+        <div class="brief-col">
+          <div class="field">
+            <span class="field-label">첫 장 후킹 문구</span>
+            <p class="hook">2주째 몸무게가 그대로라면<br><em>정체기 탈출</em> 4주 달력</p>
+          </div>
+          <div class="field">
+            <span class="field-label">구성 · 캐러셀 5장</span>
+            <ol class="slides">
+              <li><b>4주 달력 한 장</b> — 28칸, 각 칸에 식사 과제 1 + 운동 과제 1. 하루에 하나씩만</li>
+              <li><b>1주차 확대</b> — 수분·단백질 채우기 주간. 칸별 실행 기준을 숫자로</li>
+              <li><b>2~3주차 확대</b> — 식사 시간 앞당기기, 근력 볼륨 늘리기</li>
+              <li><b>4주차 + 판정 기준</b> — 체중이 아니라 무엇을 보고 정체기 탈출을 판단할지</li>
+              <li><b>내 유형 고르기</b> — 야식형 / 주말폭식형 / 운동정체형 3지선다, 댓글 유도</li>
+            </ol>
+          </div>
+          <div class="field">
+            <span class="field-label">캡션 · CTA</span>
+            <div class="caption-box">체중이 멈추면 대부분 더 굶는 쪽을 택하는데, 정체기엔 그게 제일 안 통합니다.
+
+하루에 딱 한 칸씩만 실행하는 4주 달력으로 만들었어요.
+
+👉 댓글에 본인 유형을 남겨주세요! (야식형 / 주말폭식형 / 운동정체형)
+가장 많은 유형부터 맞춤 4주 달력으로 만들어 올릴게요 🙌</div>
+          </div>
+        </div>
+        <div class="brief-col">
+          <div class="field">
+            <span class="field-label">해시태그</span>
+            <p class="tags">#다이어트정체기 #체중조절 #식습관 #4주챌린지 #홈트 #식단관리 #다이어트기록</p>
+          </div>
+          <div class="field">
+            <span class="field-label">역할 · 목표</span>
+            <div class="kpi">
+              <div><span>1순위 지표</span><span>댓글</span></div>
+              <div><span>댓글 목표</span><span>150+</span></div>
+              <div><span>좋아요 기대</span><span>1,500~2,500</span></div>
+              <div><span>제작 난이도</span><span>중</span></div>
+              <div><span>발행 순서</span><span>2주차</span></div>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">성립 조건</span>
+            <p class="note">3지선다는 <b>고민 없이 고를 수 있어야</b> 댓글이 답니다. 주관식으로 열면 댓글 수가 급감합니다. 그리고 후속 맞춤 버전을 실제로 발행해야 다음 참여형이 작동합니다.</p>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article class="brief">
+      <div class="brief-top">
+        <div class="brief-title">
+          <p class="code">기획안 C · 저장형</p>
+          <h2>운동 전후 결정표</h2>
+          <p class="goal">영양제 시간표(278)와 체지방 시계(583)가 낮았던 이유는 읽을거리였기 때문. 같은 시간 소재를 결정표로 바꿔 공식 2를 적용합니다.</p>
+        </div>
+        <div class="applied">
+          <span class="chip">공식 2 · 판단 기준</span>
+          <span class="chip">공식 1 · 9칸 매트릭스</span>
+        </div>
+      </div>
+      <div class="brief-body">
+        <div class="brief-col">
+          <div class="field">
+            <span class="field-label">첫 장 후킹 문구</span>
+            <p class="hook">공복 운동, 해도 되는 사람이 따로 있습니다<br><em>운동 전후</em> 9칸 결정표</p>
+          </div>
+          <div class="field">
+            <span class="field-label">구성 · 캐러셀 3장</span>
+            <ol class="slides">
+              <li><b>9칸 매트릭스 한 장</b> — 운동 시각(새벽·점심·저녁) × 목적(체지방·근육·유지). 각 칸에 운동 전 / 운동 후 먹을 것을 g 단위로</li>
+              <li><b>칸별 이유</b> — 왜 새벽 근육 목적은 먹고 하고, 저녁 체지방 목적은 운동 후로 몰아야 하는지</li>
+              <li><b>흔한 실수 3</b> — 공복 유산소 과신, 운동 후 단백질만, 저녁 운동 후 굶기</li>
+            </ol>
+          </div>
+          <div class="field">
+            <span class="field-label">캡션 · CTA</span>
+            <div class="caption-box">"운동 전에 먹어야 하나요, 후에 먹어야 하나요?"
+
+정답이 하나가 아니라 운동하는 시간과 목적에 따라 갈립니다. 9칸으로 정리했어요.
+
+👉 본인 칸 하나만 찾아서 저장해두세요!</div>
+          </div>
+        </div>
+        <div class="brief-col">
+          <div class="field">
+            <span class="field-label">해시태그</span>
+            <p class="tags">#운동전후 #식단관리 #공복운동 #체지방감량 #헬스식단 #운동루틴 #식습관</p>
+          </div>
+          <div class="field">
+            <span class="field-label">역할 · 목표</span>
+            <div class="kpi">
+              <div><span>1순위 지표</span><span>저장</span></div>
+              <div><span>좋아요 목표</span><span>1,200+</span></div>
+              <div><span>댓글 기대</span><span>중 · 내 칸 인증</span></div>
+              <div><span>제작 난이도</span><span>하</span></div>
+              <div><span>발행 순서</span><span>3주차</span></div>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">성립 조건</span>
+            <p class="note">"단백질 챙기세요" 같은 <b>서술형이 한 칸이라도 들어가면 결정표가 아니게</b> 됩니다. 아홉 칸을 모두 식품명과 g 단위로 채워야 공식 2가 작동합니다.</p>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<footer>
+  <b>수집 방법과 한계</b>
+  <ul>
+    <li>2026년 9월 8일 인스타그램 웹 프로필 그리드에서 최근 게시물 15개의 좋아요·댓글 수를 수집했습니다. 상단 고정 게시물 2건(4,320 / 2,438)은 게시일이 달라 표본에서 뺐습니다.</li>
+    <li>4번 게시물의 좋아요는 인스타그램이 "1.2만"으로 반올림해 표시하므로 <b>약 12,000</b>으로 계산했습니다. 이 게시물이 평균값을 크게 끌어올리므로 중앙값(583)을 함께 봐야 합니다.</li>
+    <li>저장 수와 도달은 계정 소유자만 볼 수 있어 수집하지 못했습니다. 본문의 저장 관련 해석은 좋아요·댓글 수와 캡션의 CTA 문구에서 추론한 것입니다.</li>
+    <li>기획안의 좋아요·댓글 목표치는 이 계정(팔로워 9.7만)의 성과를 기준으로 한 추정치입니다. 팔로워 규모가 다르면 절대값이 아니라 <b>중앙값 대비 배수</b>로 환산해 보는 편이 정확합니다.</li>
+  </ul>
+</footer>
+
+</div>
+</body>
+</html>

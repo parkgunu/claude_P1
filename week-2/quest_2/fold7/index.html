@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>폴드7 구매 판단서</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#F2F1EE; --surface:#FFFFFF; --surface-2:#F7F6F3; --surface-3:#EAE8E3;
+  --ink:#14161A; --ink-2:#4A4F58; --ink-3:#7C838F;
+  --line:#DCD9D3; --line-2:#C9C5BD;
+  --accent:#1F4FD8; --accent-soft:#E6ECFC;
+  --go:#1B7A4B; --go-soft:#E2F3E9;
+  --stop:#B3321F; --stop-soft:#FBE7E3;
+  --warn:#9A6B00; --warn-soft:#FBF0D8;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'IBM Plex Sans KR',system-ui,-apple-system,'Malgun Gothic',sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1013; --surface:#171A1F; --surface-2:#1D2127; --surface-3:#262B33;
+    --ink:#EDEEF0; --ink-2:#A9AFBA; --ink-3:#767D89;
+    --line:#2B3038; --line-2:#3A414B;
+    --accent:#7FA2FF; --accent-soft:#1B2540;
+    --go:#5CC98D; --go-soft:#13291F;
+    --stop:#F08A76; --stop-soft:#2E1712;
+    --warn:#E0B455; --warn-soft:#2B2210;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1013; --surface:#171A1F; --surface-2:#1D2127; --surface-3:#262B33;
+  --ink:#EDEEF0; --ink-2:#A9AFBA; --ink-3:#767D89;
+  --line:#2B3038; --line-2:#3A414B;
+  --accent:#7FA2FF; --accent-soft:#1B2540;
+  --go:#5CC98D; --go-soft:#13291F;
+  --stop:#F08A76; --stop-soft:#2E1712;
+  --warn:#E0B455; --warn-soft:#2B2210;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.7;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:920px; margin:0 auto; padding:0 24px 96px}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.3; letter-spacing:-0.02em; margin:0}
+img{max-width:100%}
+
+/* header */
+header{padding:64px 0 40px; border-bottom:1px solid var(--line)}
+.kicker{
+  font-family:var(--mono); font-size:12px; letter-spacing:0.14em;
+  text-transform:uppercase; color:var(--ink-3); margin-bottom:18px;
+}
+h1{font-size:clamp(30px,5.4vw,46px); font-weight:700}
+.sub{margin-top:14px; color:var(--ink-2); font-size:17px; max-width:60ch}
+.meta{
+  margin-top:26px; display:flex; flex-wrap:wrap; gap:8px 20px;
+  font-family:var(--mono); font-size:12px; color:var(--ink-3);
+}
+
+/* verdict */
+.verdict{
+  margin:44px 0 0; background:var(--surface); border:1px solid var(--line);
+  border-radius:14px; overflow:hidden;
+}
+.verdict-top{
+  padding:28px 30px; border-bottom:1px solid var(--line);
+  display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap;
+}
+.stamp{
+  flex:0 0 auto; font-family:var(--mono); font-weight:600; font-size:13px;
+  letter-spacing:0.06em; padding:7px 14px; border-radius:999px;
+  background:var(--warn-soft); color:var(--warn); border:1px solid currentColor;
+}
+.verdict-line{flex:1 1 300px; min-width:0}
+.verdict-line h2{font-size:22px; font-weight:600}
+.verdict-line p{margin:10px 0 0; color:var(--ink-2); font-size:15px}
+.verdict-grid{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line)}
+@media (max-width:640px){.verdict-grid{grid-template-columns:1fr}}
+.vcell{background:var(--surface); padding:24px 30px}
+.vcell h3{
+  font-family:var(--mono); font-size:12px; letter-spacing:0.1em;
+  text-transform:uppercase; margin-bottom:14px;
+}
+.vcell.buy h3{color:var(--go)}
+.vcell.skip h3{color:var(--stop)}
+.vcell ul{margin:0; padding-left:18px; font-size:14.5px; color:var(--ink-2)}
+.vcell li{margin-bottom:9px}
+.vcell li b{color:var(--ink); font-weight:600}
+
+/* sections */
+section{margin-top:72px}
+.sec-head{display:flex; align-items:baseline; gap:14px; margin-bottom:8px; flex-wrap:wrap}
+.sec-num{font-family:var(--mono); font-size:13px; color:var(--ink-3)}
+section > h2{font-size:26px; font-weight:600}
+.lede{color:var(--ink-2); margin:14px 0 28px; max-width:66ch; font-size:15.5px}
+
+/* table */
+.tablebox{overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; min-width:640px; font-size:14.5px}
+th,td{padding:14px 18px; text-align:left; border-bottom:1px solid var(--line)}
+thead th{
+  background:var(--surface-2); font-family:var(--mono); font-size:11.5px;
+  letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-3); font-weight:500;
+  white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+.prod{font-weight:600}
+.prod small{display:block; font-weight:400; color:var(--ink-3); font-size:12.5px; margin-top:2px}
+.hi{background:var(--accent-soft)}
+.tag{
+  display:inline-block; font-family:var(--mono); font-size:11px; padding:2px 7px;
+  border-radius:4px; background:var(--surface-3); color:var(--ink-2); margin-left:6px;
+}
+.note{font-size:13px; color:var(--ink-3); margin-top:12px}
+
+/* gap callout */
+.gap{
+  margin-top:26px; background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; padding:26px 28px;
+}
+.gap-num{
+  font-family:var(--mono); font-size:clamp(32px,6vw,44px); font-weight:600;
+  color:var(--accent); letter-spacing:-0.03em; line-height:1.1;
+}
+.gap-lab{font-size:14px; color:var(--ink-2); margin-top:6px}
+.gap ul{margin:20px 0 0; padding-left:18px; font-size:14.5px; color:var(--ink-2)}
+.gap li{margin-bottom:8px}
+.gap li b{color:var(--ink)}
+
+/* star bars */
+.stars{display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:6px}
+@media (max-width:700px){.stars{grid-template-columns:1fr}}
+.starcard{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:24px 26px}
+.starcard h3{font-size:16px; font-weight:600; margin-bottom:4px}
+.starcard .score{
+  font-family:var(--mono); font-size:34px; font-weight:600; letter-spacing:-0.02em;
+}
+.starcard .score span{font-size:15px; color:var(--ink-3); font-weight:400; margin-left:6px}
+.bars{margin-top:18px; display:grid; gap:7px}
+.bar{display:grid; grid-template-columns:38px 1fr 54px; align-items:center; gap:10px; font-size:12.5px}
+.bar .lab{color:var(--ink-3); font-family:var(--mono)}
+.bar .track{height:7px; background:var(--surface-3); border-radius:4px; overflow:hidden}
+.bar .fill{display:block; height:100%; background:var(--accent); border-radius:4px}
+.bar .fill.low{background:var(--stop)}
+.bar .val{
+  font-family:var(--mono); color:var(--ink-2); text-align:right; font-variant-numeric:tabular-nums;
+}
+
+/* review cards */
+.cards{display:grid; gap:16px; margin-top:8px}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:24px 26px}
+.card-head{display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; margin-bottom:12px}
+.card-head h3{font-size:16.5px; font-weight:600; flex:1 1 240px}
+.card-meta{font-family:var(--mono); font-size:11.5px; color:var(--ink-3); white-space:nowrap}
+.quote{
+  border-left:2px solid var(--line-2); padding:2px 0 2px 16px; margin:14px 0;
+  color:var(--ink); font-size:15px;
+}
+.card p{margin:0 0 10px; font-size:14.5px; color:var(--ink-2)}
+.card p:last-child{margin-bottom:0}
+.pt{display:flex; gap:9px; margin-top:10px; font-size:14.5px; color:var(--ink-2)}
+.pt .mark{flex:0 0 auto; font-family:var(--mono); font-weight:600; font-size:12px; padding-top:3px}
+.pt.plus .mark{color:var(--go)}
+.pt.minus .mark{color:var(--stop)}
+.src{
+  margin-top:16px; padding-top:14px; border-top:1px solid var(--line);
+  font-family:var(--mono); font-size:11.5px; color:var(--ink-3); word-break:break-all;
+}
+.src a{color:var(--ink-3)}
+
+/* decision tree */
+.tree{display:grid; gap:12px; margin-top:8px}
+.branch{
+  display:grid; grid-template-columns:auto 1fr auto; gap:18px; align-items:center;
+  background:var(--surface); border:1px solid var(--line); border-left-width:3px;
+  border-radius:10px; padding:20px 24px;
+}
+@media (max-width:640px){.branch{grid-template-columns:1fr; gap:10px}}
+.branch.go{border-left-color:var(--go)}
+.branch.stop{border-left-color:var(--stop)}
+.branch.hold{border-left-color:var(--warn)}
+.bq{font-family:var(--mono); font-size:12px; color:var(--ink-3)}
+.bt{font-size:15px}
+.bt b{font-weight:600}
+.ba{
+  font-family:var(--mono); font-size:12.5px; font-weight:600; letter-spacing:0.04em;
+  padding:6px 12px; border-radius:6px; white-space:nowrap; text-align:center;
+}
+.branch.go .ba{background:var(--go-soft); color:var(--go)}
+.branch.stop .ba{background:var(--stop-soft); color:var(--stop)}
+.branch.hold .ba{background:var(--warn-soft); color:var(--warn)}
+
+/* checklist */
+.check{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:8px 28px; margin-top:8px}
+.check ul{margin:0; padding:0}
+.check li{
+  list-style:none; padding:16px 0 16px 30px; border-bottom:1px solid var(--line);
+  font-size:14.5px; color:var(--ink-2); position:relative;
+}
+.check li:last-child{border-bottom:none}
+.check li::before{
+  content:'\25A1'; position:absolute; left:0; top:14px;
+  font-family:var(--mono); color:var(--ink-3); font-size:16px;
+}
+.check li b{color:var(--ink); font-weight:600}
+
+/* method */
+.method{margin-top:72px; padding-top:32px; border-top:1px solid var(--line); font-size:13.5px; color:var(--ink-3)}
+.method h2{font-size:15px; color:var(--ink-2); font-weight:600; margin-bottom:14px}
+.method ul{padding-left:18px; margin:0}
+.method li{margin-bottom:8px}
+.method b{color:var(--ink-2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">구매 판단서 &middot; 2026.09.08</div>
+  <h1>갤럭시 Z 폴드7,<br>지금 사야 하나?</h1>
+  <p class="sub">
+    네이버 카페 실사용 후기(성지·판매 카페 광고글 제외)와 쿠팡의 가격·별점·리뷰 수를
+    교차 검증해서, 살 이유와 사지 말 이유를 각각 끝까지 따져본 기록.
+  </p>
+  <div class="meta">
+    <span>조사 시각 2026-09-08 오전 KST</span>
+    <span>카페 실사용글 6건 정독</span>
+    <span>쿠팡 상품평 3,418 + 2,799건 통계</span>
+  </div>
+</header>
+
+<div class="verdict">
+  <div class="verdict-top">
+    <div class="stamp">조건부 YES</div>
+    <div class="verdict-line">
+      <h2>“폴더블이 처음이고, 지금 폰을 어차피 바꿔야 한다” — 그때만 사라.</h2>
+      <p>
+        폴드7은 <b>제품으로서는 지금 사도 되는 물건</b>이다. 문제는 타이밍이다.
+        폴드8이 이미 나와서 폴드7은 한 세대 뒤로 밀렸고, 그 대신 값이 84만 원 싸졌다.
+        그 84만 원 차이가 <b>실사용에서 84만 원어치가 아니라는 것</b>이 폴드7 → 폴드8 실제 기변자들의 일치된 증언이다.
+        즉 “폴드7이라서 사지 말라”가 아니라, <b>“바꿀 이유가 없으면 사지 말라”</b>가 정확한 결론이다.
+      </p>
+    </div>
+  </div>
+  <div class="verdict-grid">
+    <div class="vcell buy">
+      <h3>사도 되는 조건</h3>
+      <ul>
+        <li>지금 폰이 <b>2년 이상 됐거나 배터리·액정이 맛이 갔다</b></li>
+        <li><b>웹툰·영상·문서·멀티태스킹</b>이 폰 사용의 큰 비중이다</li>
+        <li>폴더블을 <b>한 번도 안 써봤다</b> — 폴드7 → 폴드8 체감은 작지만, 바형 → 폴드 체감은 크다</li>
+        <li>총예산을 <b>130만 원선</b>에서 끝내고 싶다</li>
+      </ul>
+    </div>
+    <div class="vcell skip">
+      <h3>사지 말아야 할 조건</h3>
+      <ul>
+        <li>지금 폰이 <b>멀쩡하다</b> — 폴드7 중고가는 이미 110~140만 원대로 내려앉는 중</li>
+        <li>폰 사용의 대부분이 <b>카톡·전화·알림 확인</b>이다 (펼칠 일이 없으면 비싼 바형폰)</li>
+        <li><b>외근이 많고 충전할 틈이 없다</b> — 4,400mAh / 25W는 폴드7의 명확한 약점</li>
+        <li><b>카메라 화질이 1순위</b>다 — 같은 값이면 바형 S26(112.8만)이 낫다</li>
+        <li>2027년 여름 <b>폴드9</b>까지 기다릴 수 있다</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<section>
+  <div class="sec-head"><span class="sec-num">01</span><h2>내 상황에 대입하는 4단계</h2></div>
+  <p class="lede">
+    위 결론을 실제로 쓰려면 질문 순서가 중요하다. 위에서부터 내려오면서 처음 걸리는 곳이 답이다.
+  </p>
+  <div class="tree">
+    <div class="branch stop">
+      <div class="bq">Q1</div>
+      <div class="bt">지금 쓰는 폰이 <b>고장났거나 2년 이상 됐는가?</b> &rarr; 아니오</div>
+      <div class="ba">사지 마라</div>
+    </div>
+    <div class="branch stop">
+      <div class="bq">Q2</div>
+      <div class="bt">하루 폰 사용 중 <b>영상·웹툰·문서·멀티태스킹 비중이 30% 이상</b>인가? &rarr; 아니오</div>
+      <div class="ba">S26을 사라</div>
+    </div>
+    <div class="branch hold">
+      <div class="bq">Q3</div>
+      <div class="bt"><b>84만 원을 더 낼 여유</b>가 있고, 충전 못 하는 환경에서 하루를 버텨야 하는가? &rarr; 예</div>
+      <div class="ba">폴드8로 가라</div>
+    </div>
+    <div class="branch go">
+      <div class="bq">Q4</div>
+      <div class="bt">위를 다 통과했다 &rarr; <b>폴드7 256GB, 1,299,000원</b></div>
+      <div class="ba">사라</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">02</span><h2>쿠팡 실측: 가격 &middot; 별점 &middot; 리뷰 수</h2></div>
+  <p class="lede">
+    2026-09-08 오전 기준 쿠팡 자급제 판매가. 별점은 쿠팡이 표시하는 반올림 값이 아니라
+    <b>실제 별점 분포에서 직접 가중평균</b>을 계산한 값이다.
+  </p>
+  <div class="tablebox">
+    <table>
+      <thead>
+        <tr>
+          <th>상품</th><th>용량</th><th>가격</th><th>별점(가중평균)</th><th>리뷰 수</th><th>출시</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="hi">
+          <td class="prod">갤럭시 Z 폴드7<small>SM-F966N</small></td>
+          <td class="num">256GB</td>
+          <td class="num">1,299,000원</td>
+          <td class="num">4.89</td>
+          <td class="num">3,418</td>
+          <td class="num">2025.07</td>
+        </tr>
+        <tr>
+          <td class="prod">갤럭시 Z 폴드7</td>
+          <td class="num">512GB</td>
+          <td class="num">1,499,000원</td>
+          <td class="num">4.89</td>
+          <td class="num">3,418</td>
+          <td class="num">2025.07</td>
+        </tr>
+        <tr>
+          <td class="prod">갤럭시 Z 폴드7</td>
+          <td class="num">1TB</td>
+          <td class="num">1,790,000원</td>
+          <td class="num">4.89</td>
+          <td class="num">3,418</td>
+          <td class="num">2025.07</td>
+        </tr>
+        <tr>
+          <td class="prod">갤럭시 Z Fold8<small>SM-F971N</small></td>
+          <td class="num">256GB</td>
+          <td class="num">2,141,400원<span class="tag">6%↓</span></td>
+          <td class="num">4.90</td>
+          <td class="num">2,799</td>
+          <td class="num">2026.08</td>
+        </tr>
+        <tr>
+          <td class="prod">갤럭시 Z Fold8</td>
+          <td class="num">512GB</td>
+          <td class="num">2,379,200원</td>
+          <td class="num">4.90</td>
+          <td class="num">2,799</td>
+          <td class="num">2026.08</td>
+        </tr>
+        <tr>
+          <td class="prod">갤럭시 S26<small>비교용 바형</small></td>
+          <td class="num">256GB</td>
+          <td class="num">1,128,200원</td>
+          <td class="num">&mdash;</td>
+          <td class="num">8,644</td>
+          <td class="num">2026 상반기</td>
+        </tr>
+        <tr>
+          <td class="prod">폴드7 미개통 전시품<small>단순개봉 / A~특S급</small></td>
+          <td class="num">256GB</td>
+          <td class="num">1,599,000~1,639,000원</td>
+          <td class="num">4.5</td>
+          <td class="num">12</td>
+          <td class="num">&mdash;</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">
+    ※ 마지막 줄이 중요하다. “전시품 특가”라고 붙어 있지만 <b>정식 새 제품(129.9만)보다 30만 원 이상 비싸다.</b>
+    표시된 할인율 22%는 존재하지 않는 정가 205만 원 기준이다. 리뷰도 12개뿐이다. 거르는 게 맞다.
+  </p>
+
+  <div class="gap">
+    <div class="gap-num">842,400원</div>
+    <div class="gap-lab">폴드7 256GB → 폴드8 256GB 차액. 이 돈으로 사는 것은 정확히 다음 다섯 가지다.</div>
+    <ul>
+      <li><b>저반사(AR) 내부 필름</b> — 카페 기변자 다수가 “가장 체감 큰 개선”으로 꼽음</li>
+      <li><b>배터리 4,400 → 5,000mAh</b> — 오후 4~5시 잔량 50% → 70%</li>
+      <li><b>충전 속도</b> — 같은 45W 충전기로 40% 채우는 데 30분 → 20분</li>
+      <li><b>주름 감소</b> — 뎁스게이지 실측 0.12mm(폴드7 1년) → 0.04mm(폴드8U 3일)</li>
+      <li><b>내부 해상도 약 15% 상승</b> — 커버 화면 오타율도 함께 감소</li>
+    </ul>
+    <ul style="margin-top:14px">
+      <li style="color:var(--stop)"><b>카메라는 오히려 후퇴</b> — 쿠팡 리뷰 속성 만족도에서 폴드7 “아주뛰어나요 75%” vs 폴드8 “보통이에요 61%”</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">03</span><h2>별점 4.89를 곧이곧대로 믿으면 안 되는 이유</h2></div>
+  <p class="lede">
+    쿠팡은 두 제품 모두 별 5개로 표시한다. 실제 분포를 열어보면 둘은 사실상 구분이 안 된다.
+    <b>별점으로는 이 결정을 내릴 수 없다</b>는 것이 첫 번째 발견이다.
+  </p>
+  <div class="stars">
+    <div class="starcard">
+      <h3>갤럭시 Z 폴드7</h3>
+      <div class="score">4.89<span>/ 5.00 &middot; 3,418건</span></div>
+      <div class="bars">
+        <div class="bar"><span class="lab">최고</span><span class="track"><span class="fill" style="width:94.6%"></span></span><span class="val">3,232</span></div>
+        <div class="bar"><span class="lab">좋음</span><span class="track"><span class="fill" style="width:2.8%"></span></span><span class="val">96</span></div>
+        <div class="bar"><span class="lab">보통</span><span class="track"><span class="fill" style="width:1.5%"></span></span><span class="val">35</span></div>
+        <div class="bar"><span class="lab">별로</span><span class="track"><span class="fill low" style="width:1%"></span></span><span class="val">17</span></div>
+        <div class="bar"><span class="lab">나쁨</span><span class="track"><span class="fill low" style="width:1.5%"></span></span><span class="val">38</span></div>
+      </div>
+    </div>
+    <div class="starcard">
+      <h3>갤럭시 Z Fold8</h3>
+      <div class="score">4.90<span>/ 5.00 &middot; 2,799건</span></div>
+      <div class="bars">
+        <div class="bar"><span class="lab">최고</span><span class="track"><span class="fill" style="width:96%"></span></span><span class="val">96%</span></div>
+        <div class="bar"><span class="lab">좋음</span><span class="track"><span class="fill" style="width:1%"></span></span><span class="val">1%</span></div>
+        <div class="bar"><span class="lab">보통</span><span class="track"><span class="fill" style="width:1%"></span></span><span class="val">1%</span></div>
+        <div class="bar"><span class="lab">별로</span><span class="track"><span class="fill low" style="width:1%"></span></span><span class="val">1%</span></div>
+        <div class="bar"><span class="lab">나쁨</span><span class="track"><span class="fill low" style="width:1%"></span></span><span class="val">1%</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gap" style="margin-top:20px">
+    <div class="gap-lab" style="margin-top:0">
+      그래서 <b>1점(나쁨) 리뷰 38건을 직접 필터링해서 열어봤다.</b> 상위 노출 5건의 내용은 이렇다.
+    </div>
+    <ul>
+      <li><b>4건이 배송·포장 불만</b> — “완충재 하나 없이 날것으로 옴”, “문 밖에 던져져 있었다”, “박스를 흔드니 덜컹덜컹”</li>
+      <li><b>1건이 보상판매 분쟁</b> — 중고 시세 후려치기 + 반송 시 흠집</li>
+      <li><b>제품 결함을 지적한 1점 리뷰는 상위권에 없었다</b></li>
+    </ul>
+    <ul style="margin-top:14px">
+      <li>해석: 폴드7의 <b>기기 자체 불만율은 별점 수치보다 더 낮다.</b> 대신 <b>“쿠팡에서 130만 원짜리 전자기기를 사는 것” 자체의 리스크</b>가 별점에 섞여 있다. 이건 폴드7의 문제가 아니라 유통 경로의 문제이므로, 제품 선택이 아니라 <b>구매처와 수령 절차</b>에 반영해야 한다.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">04</span><h2>네이버 카페 실사용 후기 정독</h2></div>
+  <p class="lede">
+    성지·판매 카페(대한폰, 세폰모 등)의 “사전예약 혜택 / 성지 가격” 홍보글과
+    단축 URL이 달린 댓글 광고는 전부 제외했다. 남긴 것은 삼성스마트폰 카페(회원 126만)의
+    실제 기기 보유자 글과, 그 아래 달린 댓글 토론이다.
+  </p>
+
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-head">
+        <h3>“100만 원으로 가족 휴가나 다녀오겠다 싶으면, 폴드7로 앞으로 2년은 더 만족할 만하다”</h3>
+        <span class="card-meta">2026.08.09 &middot; 조회 1,625 &middot; 댓글 15</span>
+      </div>
+      <p>
+        폴드7 1TB에서 폴드8 울트라로 넘어간 사용자. 리튬배터리 업계 종사자라 서술이 구체적이다.
+        <b>뎁스게이지로 주름 깊이를 직접 측정</b>했다.
+      </p>
+      <div class="quote">
+        “폴드7은 1년 썼지만 0.12mm 나오고 폴드8울트라는 3일 썼지만 0.04mm가 나옵니다.
+        단순 3배 차이인데 체감은 그 이상입니다.”
+      </div>
+      <div class="pt plus"><span class="mark">＋</span><span>폴드8U 개선 실측: 오후 4~5시 잔량 폴드7 50% → 폴드8U 70%, 40% 충전 30분 → 20분</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>중고 시세 실황: 폴드7 512GB가 <b>삼케플 없으면 110만 원대에도 며칠씩 안 팔리고</b>, 삼케플 승계 시 120만 원 후반~140만 원</span></div>
+      <div class="quote">
+        “돈 썼는데 안 좋아질 리가 있겠습니까, 사실 100만 원 값어치는 못 하는 것 같고요.”
+      </div>
+      <div class="src">삼성스마트폰 카페 &middot; <a href="https://cafe.naver.com/anycallusershow/5228580">cafe.naver.com/anycallusershow/5228580</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>“그냥 중고 폴드7 추천드려요” — 폴드7 → 폴드8 울트라 직접 비교</h3>
+        <span class="card-meta">2026.08.11 &middot; 조회 1,764 &middot; 댓글 27</span>
+      </div>
+      <p>같은 기변 경로를 탄 다른 사용자. 개선점을 인정하면서도 결론은 정반대 방향을 가리킨다.</p>
+      <div class="quote">
+        “업글 부분은 있는데(배터리, 반사방지, 충전속도 등) 그게 100만 원 이상 더 주고
+        폴드7 중고로 팔고 폴드8울로 갈 이유가 있느냐 싶냐?”
+      </div>
+      <div class="pt plus"><span class="mark">＋</span><span>내부 해상도 상승은 “부정 불가”, 커버 화면 오타율도 눈에 띄게 감소</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>카메라는 <b>접사가 폴드7보다 오히려 느려졌다</b>고 지적</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>반론 댓글도 있음: “75만 원 차이는 값을 한다 — AP, 남은 보증기간, 배터리 용량, 카메라 1개 업글”</span></div>
+      <div class="quote">“이미 폴드7이 경량화만 보면 완성체라고 보여집니다.”</div>
+      <div class="src">삼성스마트폰 카페 &middot; <a href="https://cafe.naver.com/anycallusershow/5230884">cafe.naver.com/anycallusershow/5230884</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>“막상 써보면 폴드7도 참 편해요. 굳이 부족할 건 없는 것 같아요.”</h3>
+        <span class="card-meta">2026.08.25 &middot; 조회 3,498 &middot; 댓글 22</span>
+      </div>
+      <p>
+        폴드8을 5일 써보고 부정적 후기를 남긴 글. 폴드7 유저가 폴드8로 가면 무엇이 나빠지는지가
+        댓글 22개에 그대로 드러난다.
+      </p>
+      <div class="pt minus"><span class="mark">－</span><span>폴드7 → 폴드8은 <b>커버 화면 세로 길이가 짧아져 답답</b>. “폴드7 써본 사람으로서 폴드8울트라는 너무 옆그레이드”</span></div>
+      <div class="pt plus"><span class="mark">＋</span><span>다만 <b>바형·타사 폰에서 넘어온 사람은 대부분 만족</b>. 폴더블 입문자와 폴드 유경험자의 평가가 정반대로 갈린다</span></div>
+      <div class="quote">
+        “이전 폴드를 써봤고 폴드8을 구입한 사람 → 외부화면 답답, 뭔가 작아, 카메라 구림 등 단점이 보임.
+        처음으로 폴드를 쓰면서 폴드8을 구입한 사람 → 이쁘다, 신세계다.”
+      </div>
+      <div class="src">삼성스마트폰 카페 &middot; <a href="https://cafe.naver.com/anycallusershow/5247387">cafe.naver.com/anycallusershow/5247387</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>“한 마디로 표현하면 계륵이다” — 폴드7 부정 후기</h3>
+        <span class="card-meta">2025.07.21 &middot; 조회 3,134 &middot; 댓글 15</span>
+      </div>
+      <p>폴드7을 받자마자 쓴 비판 글. 사기 전에 알아야 할 진짜 단점이 여기 다 있다.</p>
+      <div class="pt minus"><span class="mark">－</span><span><b>앱 화면비 호환성</b> — “내부 대화면으로 앱을 실행하면 잘려 나오거나 이상하게 확대됨. 본인이 하는 게임은 화면이 전부 안 나옴”</span></div>
+      <div class="pt minus"><span class="mark">－</span><span><b>외부 화면이 울트라보다 작다</b> — 펼치기 어려운 상황에서는 오히려 손해</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>댓글: “배터리 개선이 진짜… 몇 년째 4400인지, 소비자가 이걸 외울 정도라는 게 참”</span></div>
+      <div class="pt plus"><span class="mark">＋</span><span>반론 댓글: 화면비는 <b>앱별 전체화면/원래비율 설정으로 조정 가능</b>. “적응 못 하는 분들은 몇 달도 안 되어 되팔고, 적응한 분들은 폴드만 쓴다”</span></div>
+      <div class="src">삼성스마트폰 카페 &middot; <a href="https://cafe.naver.com/anycallusershow/5033670">cafe.naver.com/anycallusershow/5033670</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>아이폰 14 Pro → 폴드7 이동 후기 (배터리 실사용 데이터)</h3>
+        <span class="card-meta">2025.09.01 &middot; 조회 1,271 &middot; 댓글 27</span>
+      </div>
+      <p>갤럭시 복귀자의 후기. 본문은 만족이지만, <b>댓글에서 배터리에 대한 솔직한 답변</b>이 나온다.</p>
+      <div class="quote">
+        Q. 14프로랑 차이 많이 날까요?<br>
+        A. “프로보다 훨씬 빨리 닳아요. 그게 체감될 정도예요. 풀충해서 나가면 퇴근쯤 되서 반 정도 남아 있어요.”
+      </div>
+      <div class="pt plus"><span class="mark">＋</span><span>통화녹음, 삼성페이, 클립보드, 커서 자유 이동 — 아이폰에서 넘어오면 편의성 체감이 크다</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>배터리는 명확한 약점. 외근이 많다면 이 한 줄이 결정적이다</span></div>
+      <div class="src">삼성스마트폰 카페 &middot; <a href="https://cafe.naver.com/anycallusershow/5067442">cafe.naver.com/anycallusershow/5067442</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>보너스: “그럼 그냥 폴드8 사면 되지 않나”를 검증해봤다</h3>
+        <span class="card-meta">2026.08~09 카페 검색 결과</span>
+      </div>
+      <p>폴드8 쪽 단점 글도 함께 훑었다. 지금 폴드8을 사는 것도 무위험 선택은 아니다.</p>
+      <div class="pt minus"><span class="mark">－</span><span>“폴드8 <b>눌림 이슈</b>로 서비스센터 다녀오신 분 계신가요?” — 초기 품질 이슈 스레드가 카페 인기글에 올라와 있음</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>“<b>카메라 성능 차이</b>, 망원이 없는 게 많이 아쉽다”, “사진 화질이 그리 좋지는 않다”</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>“그립톡 없으면 타이핑 피로감이 굉장”, “카툭튀 때문에 접어서 테이블에 놓고 쓰면 흔들림이 심함”</span></div>
+      <div class="pt minus"><span class="mark">－</span><span>사전예약 물량 배송 지연 — “폴드8 제일 불편한 점: 안 와….”</span></div>
+      <div class="src">검색어 “갤럭시 폴드7 단점 불편” 카페 탭 &middot; 삼성스마트폰 카페 다수 스레드</div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">05</span><h2>산다면, 이렇게 사라</h2></div>
+  <p class="lede">
+    앞의 4단계를 통과해서 폴드7로 결정했다면 — 조사 과정에서 나온 실패 사례들을 그대로 체크리스트로 만들었다.
+  </p>
+  <div class="check">
+    <ul>
+      <li><b>256GB(129.9만)로 충분한지 먼저 확인.</b> 1TB 사용자도 “실사용 300GB도 안 됐다”고 했다. 512GB는 +20만 원.</li>
+      <li><b>“전시품 / 단순개봉 / 미개통 특가”는 거른다.</b> 159.9만~163.9만으로 정식 새 제품보다 30만 원 이상 비싸다.</li>
+      <li><b>수령 시 개봉 영상을 찍는다.</b> 1점 리뷰 다수가 완충재 없는 포장·던짐 배송이었다. 박스를 흔들어 덜컹거리면 즉시 교환 접수.</li>
+      <li><b>커버(외부) 화면 보호필름은 따로 산다.</b> 내부 화면은 기본 부착이지만 외부는 미부착 상태로 출고된다.</li>
+      <li><b>보험을 반드시 붙인다.</b> 삼성케어플러스 분실파손 프리미엄은 자부담 20%로, 일반형(30%)보다 연 3만 원 더 내고 8만 원을 덜 낸다. 게다가 <b>삼케플은 양도가 되어 나중에 중고가 방어에 직접 기여</b>한다 — 카페 시세 기준 10~30만 원 차이.</li>
+      <li><b>충전 습관을 바꾼다.</b> 4,400mAh &middot; 25W가 약점인 만큼, 취침 중 100% 유지를 피하는 “수면 중 80% 충전” 기능을 켜둔다.</li>
+      <li><b>자주 쓰는 앱의 화면비를 먼저 확인.</b> 게임 등 일부 앱은 내부 화면에서 잘릴 수 있고, 앱별 전체화면 설정으로 대응한다.</li>
+      <li><b>구매 직전 가격을 다시 본다.</b> 조회 시점에 256GB는 “품절임박”, 512GB는 “단 2~4개 남음”이었다. 판매자와 시간대에 따라 값이 바뀐다.</li>
+    </ul>
+  </div>
+</section>
+
+<div class="method">
+  <h2>조사 방법과 한계</h2>
+  <ul>
+    <li><b>수집 시각</b> — 2026-09-08 오전, 네이버 카페 검색 탭과 쿠팡 자급제 검색/상세 페이지를 직접 조회했다.</li>
+    <li><b>광고 제외 기준</b> — 카페명·게시판명에 “성지 / 사전예약 혜택 / 휴대폰 가격”이 붙은 판매 목적 카페(대한폰·세폰모 등)의 글, 그리고 단축 URL이 포함된 댓글은 근거에서 제외했다. 남긴 글은 모두 기기 보유자가 쓴 실사용글이다.</li>
+    <li><b>별점 계산</b> — 쿠팡 표시 별점은 반올림 값이라 폴드7·폴드8 모두 “5”로 나온다. 표의 4.89는 실제 분포(최고 3,232 / 좋음 96 / 보통 35 / 별로 17 / 나쁨 38)로 직접 가중평균한 값이다. 폴드8은 개별 건수가 노출되지 않아 백분율(96/1/1/1/1%)로 계산했으므로 정밀도가 한 자리 낮다.</li>
+    <li><b>확인하지 못한 것</b> — 일부 카페 글(JN테크리뷰 등)은 회원 전용이라 본문을 읽지 못했고 제목·검색 스니펫만 참고했다. 판단만을 위해 카페에 임의로 가입하지는 않았다.</li>
+    <li><b>리뷰의 신뢰도</b> — 쿠팡 상위 리뷰 상당수가 정형화된 장문 형식이라 체험단·협찬 가능성을 배제할 수 없다. 그래서 이 문서의 판단 근거는 <b>별점 자체보다 카페 실사용자의 구체적 수치 증언</b>(주름 실측, 배터리 잔량, 중고 시세)에 더 무게를 두었다.</li>
+    <li><b>다루지 않은 것</b> — 통신사 지원금/성지 가격, 중고 직거래 시세는 조사 범위(네이버 카페 후기 + 쿠팡)를 벗어나므로 제외했다. 다만 카페 글에서 언급된 중고가는 참고 수치로 인용했다.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>

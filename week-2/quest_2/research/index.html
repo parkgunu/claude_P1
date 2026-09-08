@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한강 사이클 50만원대</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600&display=swap">
+<style>
+:root{
+  --ground:#EBEFEC; --surface:#FFFFFF; --surface-2:#F4F7F4;
+  --ink:#0F1A1C; --ink-2:#39494C; --muted:#6B7D7E; --line:#D2DBD7; --line-2:#E2E9E5;
+  --accent:#0C6A62; --accent-ink:#0C6A62; --accent-soft:#D7E9E5;
+  --copper:#A9552C; --copper-soft:#F3E2D8;
+  --good:#2C7554; --warn:#8E6410;
+  --shadow:0 1px 2px rgba(15,26,28,.05), 0 8px 24px -16px rgba(15,26,28,.28);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0C1214; --surface:#141C1E; --surface-2:#192325;
+    --ink:#E3EDE9; --ink-2:#B4C4C1; --muted:#7E9290; --line:#253235; --line-2:#1F2B2D;
+    --accent:#4FC0B0; --accent-ink:#63CCBC; --accent-soft:#11322E;
+    --copper:#DE8B5F; --copper-soft:#33211A;
+    --good:#57B98A; --warn:#CFA349;
+    --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 28px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0C1214; --surface:#141C1E; --surface-2:#192325;
+  --ink:#E3EDE9; --ink-2:#B4C4C1; --muted:#7E9290; --line:#253235; --line-2:#1F2B2D;
+  --accent:#4FC0B0; --accent-ink:#63CCBC; --accent-soft:#11322E;
+  --copper:#DE8B5F; --copper-soft:#33211A;
+  --good:#57B98A; --warn:#CFA349;
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 28px -18px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans KR","Gothic A1",-apple-system,"Malgun Gothic",sans-serif;
+  font-weight:400; line-height:1.7; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1060px; margin:0 auto; padding:0 24px}
+h1,h2,h3,h4{font-family:"Gothic A1","IBM Plex Sans KR",sans-serif; text-wrap:balance; margin:0}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--accent-ink); font-weight:600;
+}
+
+header{
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, var(--accent-soft) 0%, transparent 70%), var(--surface);
+}
+.head-in{padding:44px 0 34px; display:flex; flex-direction:column; gap:22px}
+h1{font-size:clamp(34px,6vw,54px); font-weight:900; letter-spacing:-.02em; line-height:1.12}
+h1 em{font-style:normal; color:var(--accent-ink)}
+.lede{max-width:60ch; font-size:16.5px; color:var(--ink-2); margin:0}
+.meta-row{
+  display:flex; flex-wrap:wrap; gap:0; border-top:1px solid var(--line-2);
+  padding-top:18px; margin:2px 0 0;
+}
+.meta{
+  padding:0 22px 0 0; margin-right:22px; border-right:1px solid var(--line-2);
+  display:flex; flex-direction:column; gap:2px;
+}
+.meta:last-child{border-right:0}
+.meta dt{font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);
+  font-family:"IBM Plex Mono",monospace}
+.meta dd{margin:0; font-size:15px; font-weight:600; color:var(--ink)}
+
+main{padding:0 0 72px}
+section{padding:52px 0 0}
+.sec-head{display:flex; flex-direction:column; gap:8px; margin-bottom:24px}
+.sec-head h2{font-size:clamp(21px,3vw,26px); font-weight:800; letter-spacing:-.01em}
+.sec-head p{margin:0; color:var(--ink-2); max-width:64ch; font-size:15px}
+
+.checks{display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:1px;
+  background:var(--line-2); border:1px solid var(--line-2); border-radius:4px; overflow:hidden}
+.check{background:var(--surface); padding:20px 20px 22px; display:flex; flex-direction:column; gap:7px}
+.check h3{font-size:15.5px; font-weight:800; display:flex; align-items:baseline; gap:8px}
+.check .tag{font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:600;
+  color:var(--accent-ink); letter-spacing:.08em}
+.check p{margin:0; font-size:13.5px; color:var(--ink-2); line-height:1.65}
+.check strong{color:var(--ink); font-weight:600}
+
+.tscroll{overflow-x:auto; border:1px solid var(--line); border-radius:4px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; min-width:880px; font-size:13.5px}
+thead th{
+  background:var(--surface-2); text-align:left; padding:11px 13px;
+  font-family:"Gothic A1",sans-serif; font-weight:700; font-size:12px; color:var(--ink-2);
+  border-bottom:1px solid var(--line); white-space:nowrap;
+}
+tbody td{padding:12px 13px; border-bottom:1px solid var(--line-2); vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface-2)}
+td.name{font-weight:600; color:var(--ink); min-width:190px; line-height:1.45}
+td.name span{display:block; font-weight:400; font-size:11.5px; color:var(--muted); margin-top:2px}
+td.price{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums;
+  font-weight:600; white-space:nowrap}
+td.num{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+.pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600;
+  font-family:"Gothic A1",sans-serif; white-space:nowrap}
+.pill.disc{background:var(--accent-soft); color:var(--accent-ink)}
+.pill.cal{background:var(--copper-soft); color:var(--copper)}
+.pill.full{background:var(--accent-soft); color:var(--accent-ink)}
+.pill.half{background:var(--surface-2); color:var(--muted); border:1px solid var(--line)}
+.star{color:var(--warn); font-weight:600; font-family:"IBM Plex Mono",monospace}
+.star small{color:var(--muted); font-weight:400}
+.dash{color:var(--muted)}
+.up-price{color:var(--copper)}
+.sub-note{font-weight:400; color:var(--muted)}
+
+.chart{background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:24px 22px 16px}
+.chart-rows{display:flex; flex-direction:column; gap:11px}
+.crow{display:grid; grid-template-columns:minmax(120px,1.1fr) 1fr 58px; align-items:center; gap:14px}
+.crow .lab{font-size:13px; font-weight:500; color:var(--ink-2); line-height:1.3}
+.track{position:relative; height:16px; background:var(--surface-2); border-radius:2px;
+  border:1px solid var(--line-2)}
+.bar{position:absolute; left:0; top:0; bottom:0; border-radius:2px 0 0 2px; background:var(--accent)}
+.bar.heavy{background:var(--copper)}
+.crow .val{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums;
+  font-size:13px; font-weight:600; text-align:right}
+.axis{display:grid; grid-template-columns:minmax(120px,1.1fr) 1fr 58px; gap:14px; margin-top:12px;
+  padding-top:10px; border-top:1px solid var(--line-2)}
+.axis-ticks{display:flex; justify-content:space-between; font-family:"IBM Plex Mono",monospace;
+  font-size:11px; color:var(--muted)}
+.axis-unit{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); text-align:right}
+.chart-note{margin:14px 0 0; font-size:12.5px; color:var(--muted)}
+
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:4px;
+  padding:22px 22px 20px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--shadow)}
+.card-top{display:flex; flex-direction:column; gap:6px}
+.role{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.12em;
+  text-transform:uppercase; font-weight:600; color:var(--accent-ink)}
+.card h3{font-size:18px; font-weight:800; letter-spacing:-.01em; line-height:1.3}
+.card .brand{font-size:12px; color:var(--muted); margin-top:-2px}
+.figure{display:flex; align-items:baseline; gap:9px; flex-wrap:wrap;
+  padding:10px 0 12px; border-bottom:1px solid var(--line-2)}
+.figure .won{font-family:"IBM Plex Mono",monospace; font-size:24px; font-weight:600;
+  letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.figure .cond{font-size:12px; color:var(--muted)}
+.verdict{margin:0; font-size:14px; color:var(--ink-2); line-height:1.7}
+.verdict b{color:var(--ink); font-weight:600}
+.pros{display:flex; flex-direction:column; gap:8px; margin:0; padding:0; list-style:none}
+.pros li{display:grid; grid-template-columns:16px 1fr; gap:9px; font-size:13.5px;
+  color:var(--ink-2); line-height:1.6}
+.pros .mk{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:13px}
+.pros .up .mk{color:var(--good)}
+.pros .down .mk{color:var(--copper)}
+.spec-line{display:flex; flex-wrap:wrap; gap:6px; margin-top:auto; padding-top:4px}
+.chip{font-family:"IBM Plex Mono",monospace; font-size:11px; padding:3px 8px;
+  border:1px solid var(--line); border-radius:3px; color:var(--ink-2); background:var(--surface-2)}
+
+.sites{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px;
+  margin-bottom:22px}
+.site{border:1px solid var(--line); border-radius:4px; background:var(--surface); padding:18px 18px 16px;
+  display:flex; flex-direction:column; gap:9px}
+.site-name{display:flex; align-items:baseline; justify-content:space-between; gap:10px}
+.site-name h3{font-size:16px; font-weight:800}
+.site-name .n{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted)}
+.site p{margin:0; font-size:13px; color:var(--ink-2); line-height:1.65}
+.site strong{color:var(--ink); font-weight:600}
+.site .use{font-size:12px; color:var(--accent-ink); font-weight:600}
+
+.picks{display:flex; flex-direction:column; gap:0; border:1px solid var(--line);
+  border-radius:4px; overflow:hidden; background:var(--surface)}
+.pick{display:grid; grid-template-columns:minmax(140px,180px) 1fr; gap:22px;
+  padding:20px 22px; border-bottom:1px solid var(--line-2); align-items:start}
+.pick:last-child{border-bottom:0}
+.pick-when{display:flex; flex-direction:column; gap:4px}
+.pick-when .q{font-size:14.5px; font-weight:800; font-family:"Gothic A1",sans-serif; line-height:1.4}
+.pick-when .sub{font-size:12px; color:var(--muted)}
+.pick-what{display:flex; flex-direction:column; gap:6px}
+.pick-what .m{font-size:15.5px; font-weight:700}
+.pick-what .m span{font-family:"IBM Plex Mono",monospace; font-weight:600; color:var(--accent-ink);
+  font-size:14px; margin-left:8px}
+.pick-what p{margin:0; font-size:13.5px; color:var(--ink-2); line-height:1.65}
+
+.notes{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:20px}
+.note{display:flex; flex-direction:column; gap:7px; padding-left:14px;
+  border-left:2px solid var(--accent)}
+.note h3{font-size:14.5px; font-weight:800}
+.note p{margin:0; font-size:13.5px; color:var(--ink-2); line-height:1.7}
+.note strong{color:var(--ink); font-weight:600}
+.note code{font-family:"IBM Plex Mono",monospace; font-size:12.5px; background:var(--surface-2);
+  padding:1px 5px; border-radius:3px; border:1px solid var(--line-2)}
+
+.method{background:var(--surface-2); border:1px solid var(--line-2); border-radius:4px;
+  padding:22px 24px; display:flex; flex-direction:column; gap:12px}
+.method h2{font-size:16px; font-weight:800}
+.method p{margin:0; font-size:13px; color:var(--ink-2); line-height:1.75; max-width:78ch}
+.method strong{color:var(--ink); font-weight:600}
+.method .blocked{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted)}
+
+footer{border-top:1px solid var(--line); padding:26px 0 40px; color:var(--muted); font-size:12.5px}
+
+@media (max-width:640px){
+  .meta{border-right:0; padding-right:0; margin-right:0; min-width:44%}
+  .pick{grid-template-columns:1fr; gap:10px}
+  .crow{grid-template-columns:minmax(88px,1fr) 1fr 50px; gap:9px}
+  .axis{grid-template-columns:minmax(88px,1fr) 1fr 50px; gap:9px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+a{color:var(--accent-ink)}
+a:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap head-in">
+    <div class="eyebrow">한강 라이딩 입문 · 가격비교 리포트</div>
+    <h1>50만원으로 타는<br><em>한강 사이클</em> 11종</h1>
+    <p class="lede">
+      다나와 · 에누리 · 11번가 세 곳에서 50만~60만원 구간의 로드(싸이클)만 뽑아
+      무게, 구동계, 브레이크, 조립 상태를 같은 기준으로 맞춰 비교했습니다.
+      한강 자전거도로처럼 평지가 길고 급정거가 잦은 환경에서 실제로 갈리는 항목 위주로 정리했습니다.
+    </p>
+    <dl class="meta-row">
+      <div class="meta"><dt>조사일</dt><dd class="mono">2026-09-08</dd></div>
+      <div class="meta"><dt>비교 사이트</dt><dd>3곳</dd></div>
+      <div class="meta"><dt>후보 모델</dt><dd>11종</dd></div>
+      <div class="meta"><dt>가격 구간</dt><dd class="mono">50.0만 – 59.9만</dd></div>
+      <div class="meta"><dt>최저가 기준</dt><dd>다나와 현금가</dd></div>
+    </dl>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <div class="sec-head">
+      <h2>한강에서 실제로 갈리는 네 가지</h2>
+      <p>같은 50만원대라도 이 네 항목에서 차이가 납니다. 카탈로그의 나머지 스펙은 이 가격대에서 대부분 비슷합니다.</p>
+    </div>
+    <div class="checks">
+      <div class="check">
+        <h3><span class="tag">01</span>무게</h3>
+        <p>한강은 평지라 주행 중엔 체감이 적지만, <strong>나들목 계단과 지하철 휴대</strong>에서 갈립니다.
+        후보군은 <strong>10.6kg ~ 12.6kg</strong>으로 2kg 차이가 납니다.</p>
+      </div>
+      <div class="check">
+        <h3><span class="tag">02</span>브레이크</h3>
+        <p>보행자·강아지·킥보드로 <strong>급정거가 잦고</strong> 비 온 뒤 노면이 젖습니다.
+        디스크가 유리하지만, 캘리퍼(림) 모델은 대신 <strong>0.5~1kg 가볍습니다</strong>.</p>
+      </div>
+      <div class="check">
+        <h3><span class="tag">03</span>구동계</h3>
+        <p>평지 위주라 14단으로도 충분합니다. 남산·북악까지 확장할 생각이면 16~18단.
+        중요한 건 단수보다 <strong>시마노 정품이냐 L-TWOO냐</strong> — 부품 수급이 달라집니다.</p>
+      </div>
+      <div class="check">
+        <h3><span class="tag">04</span>조립 상태</h3>
+        <p>같은 모델도 <strong>반조립이 2~5만원 쌉니다</strong>. 로드는 변속 세팅이 까다로워
+        첫 자전거라면 완조립을 고르거나 샵 조립비 2~3만원을 계산에 넣으세요.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>후보 11종 전체 비교</h2>
+      <p>가격순이 아니라 <strong>한강 용도 기준 추천순</strong>입니다. 가격은 조사 시점의 다나와 최저가이며 배송비·조립비는 별도입니다.</p>
+    </div>
+    <div class="tscroll">
+      <table>
+        <thead>
+          <tr>
+            <th>모델</th><th>최저가</th><th>무게</th><th>단수</th><th>구동계</th>
+            <th>브레이크</th><th>프레임</th><th>조립</th><th>리뷰</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">SRD R5 <span>2026년형 · 판매몰 121곳</span></td>
+            <td class="price">522,490</td><td class="num">10.7kg</td><td class="num">18단</td>
+            <td>L-TWOO R5</td><td><span class="pill disc">디스크</span></td><td>알루미늄 에어로</td>
+            <td><span class="pill half">반조립</span></td>
+            <td class="star">4.8 <small>(15)</small></td>
+          </tr>
+          <tr>
+            <td class="name">삼천리 아팔란치아 R16D 700C <span>2023년형 · 판매몰 15곳</span></td>
+            <td class="price">540,000</td><td class="num">11.4kg</td><td class="num">16단</td>
+            <td>시마노 클라리스 2000</td><td><span class="pill disc">디스크</span></td><td>알루미늄</td>
+            <td><span class="pill full">완조립</span></td>
+            <td class="star">5.0 <small>(1)</small></td>
+          </tr>
+          <tr>
+            <td class="name">K2 프로마스터 노비스 2 <span>2023년형 · 판매몰 23곳</span></td>
+            <td class="price">517,150</td><td class="num">11.1kg</td><td class="num">18단</td>
+            <td>시마노 소라</td><td><span class="pill disc">디스크</span></td><td>알루미늄</td>
+            <td><span class="pill half">미조립</span></td>
+            <td class="dash">—</td>
+          </tr>
+          <tr>
+            <td class="name">레이윤 R16D <span>판매몰 9곳</span></td>
+            <td class="price">513,710</td><td class="num">11.8kg</td><td class="num">16단</td>
+            <td>L-TWOO R3</td><td><span class="pill disc">디스크</span></td><td>알루미늄 에어로</td>
+            <td class="dash">—</td>
+            <td class="star">5.0 <small>(3)</small></td>
+          </tr>
+          <tr>
+            <td class="name">삼천리 아팔란치아 XRS 14 <span>2023년형 · 판매몰 3곳</span></td>
+            <td class="price">515,000</td><td class="num">10.8kg</td><td class="num">14단</td>
+            <td>시마노 투어니 A070</td><td><span class="pill cal">캘리퍼</span></td><td>알루미늄</td>
+            <td><span class="pill full">완조립</span></td>
+            <td class="star">5.0 <small>(1)</small></td>
+          </tr>
+          <tr>
+            <td class="name">알톤 벨트릭스 R16 <span>2027년형</span></td>
+            <td class="price">566,390</td><td class="num">11.2kg</td><td class="num">16단</td>
+            <td>시마노 클라리스 R2000</td><td><span class="pill disc">디스크</span></td><td>알루미늄</td>
+            <td class="dash">—</td>
+            <td class="dash">—</td>
+          </tr>
+          <tr>
+            <td class="name">삼천리 아팔란치아 R14 700C <span>2025년형</span></td>
+            <td class="price">500,000</td><td class="num">10.6kg</td><td class="num">14단</td>
+            <td>시마노 투어니 A070</td><td><span class="pill cal">캘리퍼</span></td><td>알루미늄</td>
+            <td class="dash">—</td>
+            <td class="dash">—</td>
+          </tr>
+          <tr>
+            <td class="name">삼천리 아팔란치아 R14 SE 700C <span>2026년형 · 판매몰 9곳</span></td>
+            <td class="price">500,000</td><td class="num dash">미표기</td><td class="num">14단</td>
+            <td>시마노 투어니급</td><td class="dash">—</td><td>알루미늄</td>
+            <td><span class="pill full">완조립</span></td>
+            <td class="star">3.5 <small>(2)</small></td>
+          </tr>
+          <tr>
+            <td class="name">알톤 자비스 14D <span>2024년형 · 판매몰 6곳</span></td>
+            <td class="price">530,000</td><td class="num">12.6kg</td><td class="num">14단</td>
+            <td>클라리스 FD + 투어니 RD</td><td><span class="pill disc">디스크</span></td><td>알루미늄</td>
+            <td><span class="pill full">완조립</span></td>
+            <td class="star">4.9 <small>(10)</small></td>
+          </tr>
+          <tr>
+            <td class="name">스마트 아르티니 <span>2024년형</span></td>
+            <td class="price">571,500</td><td class="num">10.7kg</td><td class="num">16단</td>
+            <td>시마노 클라리스 R2000</td><td><span class="pill cal">캘리퍼</span></td><td>알루미늄</td>
+            <td class="dash">—</td>
+            <td class="dash">—</td>
+          </tr>
+          <tr>
+            <td class="name">알톤 벨트릭스 R18 <span>2027년형</span></td>
+            <td class="price">576,280</td><td class="num">11.3kg</td><td class="num">18단</td>
+            <td>L-TWOO R5</td><td><span class="pill disc">디스크</span></td><td>알루미늄</td>
+            <td class="dash">—</td>
+            <td class="dash">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>무게 비교</h2>
+      <p>계단 들기와 지하철 휴대에서 체감되는 차이입니다. 막대가 짧을수록 가볍습니다.</p>
+    </div>
+    <div class="chart">
+      <div class="chart-rows">
+        <div class="crow"><div class="lab">삼천리 R14 700C</div>
+          <div class="track"><div class="bar" style="width:20.0%"></div></div>
+          <div class="val">10.6</div></div>
+        <div class="crow"><div class="lab">SRD R5</div>
+          <div class="track"><div class="bar" style="width:23.3%"></div></div>
+          <div class="val">10.7</div></div>
+        <div class="crow"><div class="lab">스마트 아르티니</div>
+          <div class="track"><div class="bar" style="width:23.3%"></div></div>
+          <div class="val">10.7</div></div>
+        <div class="crow"><div class="lab">삼천리 XRS 14</div>
+          <div class="track"><div class="bar" style="width:26.7%"></div></div>
+          <div class="val">10.8</div></div>
+        <div class="crow"><div class="lab">K2 노비스 2</div>
+          <div class="track"><div class="bar" style="width:36.7%"></div></div>
+          <div class="val">11.1</div></div>
+        <div class="crow"><div class="lab">알톤 벨트릭스 R16</div>
+          <div class="track"><div class="bar" style="width:40.0%"></div></div>
+          <div class="val">11.2</div></div>
+        <div class="crow"><div class="lab">알톤 벨트릭스 R18</div>
+          <div class="track"><div class="bar" style="width:43.3%"></div></div>
+          <div class="val">11.3</div></div>
+        <div class="crow"><div class="lab">삼천리 R16D</div>
+          <div class="track"><div class="bar" style="width:46.7%"></div></div>
+          <div class="val">11.4</div></div>
+        <div class="crow"><div class="lab">레이윤 R16D</div>
+          <div class="track"><div class="bar" style="width:60.0%"></div></div>
+          <div class="val">11.8</div></div>
+        <div class="crow"><div class="lab">알톤 자비스 14D</div>
+          <div class="track"><div class="bar heavy" style="width:86.7%"></div></div>
+          <div class="val">12.6</div></div>
+      </div>
+      <div class="axis">
+        <div></div>
+        <div class="axis-ticks"><span>10.0</span><span>11.0</span><span>12.0</span><span>13.0</span></div>
+        <div class="axis-unit">kg</div>
+      </div>
+      <p class="chart-note">제조사 공표 기준. 페달·케이지 포함 여부가 브랜드마다 달라 ±0.3kg 오차는 감안하세요.
+        아팔란치아 R14 SE는 무게 미표기로 제외했습니다.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>주요 5종 상세</h2>
+      <p>전체 11종 중 한강 용도로 실제 후보가 되는 다섯 대입니다.</p>
+    </div>
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-top">
+          <div class="role">스펙 총합 1위</div>
+          <h3>SRD R5 (2026년형)</h3>
+          <div class="brand">솔리드 레이싱 디자인</div>
+        </div>
+        <div class="figure">
+          <span class="won">522,490원</span>
+          <span class="cond">반조립 · 완조립은 561,990원</span>
+        </div>
+        <p class="verdict">이 가격대에서 <b>10.7kg + 18단 + 디스크</b>를 동시에 갖춘 유일한 조합입니다.
+          판매몰이 121곳으로 가장 많고 리뷰도 15건 4.8점으로 이 목록에서 표본이 가장 두껍습니다.</p>
+        <ul class="pros">
+          <li class="up"><span class="mk">+</span><span>풀 인터널 케이블 에어로 프레임 — 이 가격대에선 드문 마감</span></li>
+          <li class="up"><span class="mk">+</span><span>리뷰 15건, 판매몰 121곳으로 검증 표본이 가장 큼</span></li>
+          <li class="down"><span class="mk">−</span><span>L-TWOO R5 구동계 — 시마노 대비 부품 수급·샵 대응이 약함</span></li>
+          <li class="down"><span class="mk">−</span><span>최저가는 반조립. 완조립은 39,500원 추가</span></li>
+        </ul>
+        <div class="spec-line">
+          <span class="chip">700C</span><span class="chip">18단</span>
+          <span class="chip">디스크</span><span class="chip">10.7kg</span><span class="chip">460·490·520</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-top">
+          <div class="role">첫 로드바이크 안심 픽</div>
+          <h3>아팔란치아 R16D 700C</h3>
+          <div class="brand">삼천리자전거 · 2023년형</div>
+        </div>
+        <div class="figure">
+          <span class="won">540,000원</span>
+          <span class="cond">완조립 배송</span>
+        </div>
+        <p class="verdict">앞뒤 모두 <b>시마노 클라리스 정품</b>에 <b>완조립 배송</b>입니다.
+          전국 삼천리 대리점에서 정비를 받을 수 있어, 자전거를 직접 만질 생각이 없다면 가장 속 편한 선택입니다.</p>
+        <ul class="pros">
+          <li class="up"><span class="mk">+</span><span>클라리스 FD-2000 / RD-2000 — 앞뒤 모두 시마노 정품</span></li>
+          <li class="up"><span class="mk">+</span><span>완조립 + 전국 대리점 AS망</span></li>
+          <li class="down"><span class="mk">−</span><span>11.4kg으로 최경량 대비 0.8kg 무거움</span></li>
+          <li class="down"><span class="mk">−</span><span>2023년형 재고 모델 — 사이즈·색상 선택폭이 좁음</span></li>
+        </ul>
+        <div class="spec-line">
+          <span class="chip">700C</span><span class="chip">16단</span>
+          <span class="chip">디스크</span><span class="chip">11.4kg</span><span class="chip">440·490·510</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-top">
+          <div class="role">구동계 등급 최상</div>
+          <h3>프로마스터 노비스 2</h3>
+          <div class="brand">K2바이크 · 2023년형</div>
+        </div>
+        <div class="figure">
+          <span class="won">517,150원</span>
+          <span class="cond">미조립 · 완조립은 564,000원</span>
+        </div>
+        <p class="verdict">50만원대에서 <b>시마노 소라</b>가 달려 나오는 거의 유일한 모델입니다.
+          소라는 클라리스보다 한 등급 위로, 한동안 업그레이드 욕심 없이 탈 수 있는 지점입니다.</p>
+        <ul class="pros">
+          <li class="up"><span class="mk">+</span><span>시마노 소라 18단 — 이 가격대 최고 등급 구동계</span></li>
+          <li class="up"><span class="mk">+</span><span>11.1kg 디스크 모델로 무게 균형도 좋음</span></li>
+          <li class="down"><span class="mk">−</span><span>최저가는 미조립 — 완조립까지 46,850원 차이</span></li>
+          <li class="down"><span class="mk">−</span><span>다나와 등록 리뷰가 없어 실사용 표본 부족</span></li>
+        </ul>
+        <div class="spec-line">
+          <span class="chip">700C</span><span class="chip">18단</span>
+          <span class="chip">디스크</span><span class="chip">11.1kg</span><span class="chip">470·500·530</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-top">
+          <div class="role">최경량 · 최저가</div>
+          <h3>아팔란치아 XRS 14</h3>
+          <div class="brand">삼천리자전거 · 2023년형</div>
+        </div>
+        <div class="figure">
+          <span class="won">515,000원</span>
+          <span class="cond">완조립 배송</span>
+        </div>
+        <p class="verdict">캘리퍼 브레이크를 받아들이는 대신 <b>10.8kg</b>과 <b>사이즈 5종(380~510)</b>을 얻습니다.
+          한강만 탈 거라면 캘리퍼로 충분하고, 계단 들기가 잦다면 이쪽이 유리합니다.</p>
+        <ul class="pros">
+          <li class="up"><span class="mk">+</span><span>10.8kg — 같은 값 디스크 모델보다 0.5kg 이상 가벼움</span></li>
+          <li class="up"><span class="mk">+</span><span>380부터 510까지 5개 사이즈, 체형 맞추기 쉬움</span></li>
+          <li class="down"><span class="mk">−</span><span>캘리퍼 브레이크 — 비 온 뒤 젖은 노면에서 제동력 저하</span></li>
+          <li class="down"><span class="mk">−</span><span>투어니 A070 14단 — 구동계는 입문 최하급</span></li>
+        </ul>
+        <div class="spec-line">
+          <span class="chip">700C</span><span class="chip">14단</span>
+          <span class="chip">캘리퍼</span><span class="chip">10.8kg</span><span class="chip">380~510</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-top">
+          <div class="role">리뷰 검증량 최다</div>
+          <h3>자비스 14D</h3>
+          <div class="brand">알톤스포츠 · 2024년형</div>
+        </div>
+        <div class="figure">
+          <span class="won">530,000원</span>
+          <span class="cond">완조립 · 반조립은 540,000원</span>
+        </div>
+        <p class="verdict">리뷰 10건에 평점 4.9로 만족도가 가장 안정적입니다. 다만 <b>12.6kg</b>으로
+          이 목록에서 가장 무겁습니다. 자전거를 들고 옮길 일이 없다면 문제되지 않습니다.</p>
+        <ul class="pros">
+          <li class="up"><span class="mk">+</span><span>평점 4.9 / 리뷰 10건 — 후보군 중 가장 일관된 만족도</span></li>
+          <li class="up"><span class="mk">+</span><span>완조립이 반조립보다 오히려 1만원 저렴한 역전 구간</span></li>
+          <li class="down"><span class="mk">−</span><span>12.6kg — 최경량 대비 2kg 무거움. 계단·지하철엔 부담</span></li>
+          <li class="down"><span class="mk">−</span><span>뒷변속기가 투어니로 내려간 혼합 구성</span></li>
+        </ul>
+        <div class="spec-line">
+          <span class="chip">700C</span><span class="chip">14단</span>
+          <span class="chip">디스크</span><span class="chip">12.6kg</span><span class="chip">380·430·460</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>사이트 3곳, 같은 모델 다른 가격</h2>
+      <p>같은 자전거도 어디서 보느냐에 따라 최대 5만원까지 차이가 났습니다. 아래는 세 사이트에서 교차로 확인된 값입니다.</p>
+    </div>
+    <div class="sites">
+      <div class="site">
+        <div class="site-name"><h3>다나와</h3><span class="n">11종 수집</span></div>
+        <p>스펙 표기가 가장 정밀합니다. 무게, 앞뒤 변속기 모델명, 프레임 사이즈, <strong>완조립/반조립별 최저가</strong>를
+          따로 보여줘 실구매가 계산이 가능합니다.</p>
+        <div class="use">→ 스펙 비교와 최저가의 기준</div>
+      </div>
+      <div class="site">
+        <div class="site-name"><h3>에누리</h3><span class="n">교차 검증</span></div>
+        <p>판매처 수와 리뷰 수가 앞에 나와 <strong>실제로 팔리는 모델인지</strong> 가려내기 좋습니다.
+          다만 같은 모델 가격이 다나와보다 높게 잡히는 경우가 많았습니다.</p>
+        <div class="use">→ 인기도·판매처 수 판단</div>
+      </div>
+      <div class="site">
+        <div class="site-name"><h3>11번가</h3><span class="n">실구매가 확인</span></div>
+        <p>가격비교 사이트에 안 나오는 <strong>배송비(15,000~20,000원)와 조립 상태</strong>가 상품명에 그대로 적혀 있습니다.
+          카드 할인·포인트 적립까지 붙습니다.</p>
+        <div class="use">→ 배송비 포함 최종 결제가</div>
+      </div>
+    </div>
+    <div class="tscroll">
+      <table style="min-width:620px">
+        <thead>
+          <tr><th>모델</th><th>다나와</th><th>에누리</th><th>11번가</th><th>최대 차이</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">SRD R5 (2026)</td>
+            <td class="price">522,490</td><td class="dash">—</td>
+            <td class="price">549,190 <span class="sub-note">+배송 15,000</span></td>
+            <td class="num up-price">+41,700</td>
+          </tr>
+          <tr>
+            <td class="name">아팔란치아 R14 SE 700C (2026)</td>
+            <td class="price">500,000</td><td class="price">505,000</td><td class="dash">—</td>
+            <td class="num up-price">+5,000</td>
+          </tr>
+          <tr>
+            <td class="name">아팔란치아 R14 700C (2026)</td>
+            <td class="price">577,500</td><td class="price">590,000</td><td class="dash">—</td>
+            <td class="num up-price">+12,500</td>
+          </tr>
+          <tr>
+            <td class="name">아팔란치아 R14D 700C (2026)</td>
+            <td class="price">590,000</td><td class="price">640,000</td><td class="dash">—</td>
+            <td class="num up-price">+50,000</td>
+          </tr>
+          <tr>
+            <td class="name">SRD R5 PRO (2026) <span>참고 · 60만원대라 후보 제외</span></td>
+            <td class="dash">—</td><td class="price">606,060</td><td class="price">645,000</td>
+            <td class="num up-price">+38,940</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>이런 경우라면 이걸</h2>
+      <p>모든 조건을 만족하는 한 대는 없습니다. 무엇을 포기할지로 결정하는 편이 빠릅니다.</p>
+    </div>
+    <div class="picks">
+      <div class="pick">
+        <div class="pick-when">
+          <div class="q">스펙을 최대한 뽑고 싶다</div>
+          <div class="sub">직접 정비할 의향 있음</div>
+        </div>
+        <div class="pick-what">
+          <div class="m">SRD R5 (2026년형)<span>522,490원</span></div>
+          <p>10.7kg · 18단 · 디스크를 이 예산에서 전부 가져가는 유일한 선택입니다.
+            L-TWOO 구동계라는 리스크를 감수하는 대신, 리뷰 15건·판매몰 121곳이라는 가장 큰 검증 표본이 뒤를 받쳐줍니다.</p>
+        </div>
+      </div>
+      <div class="pick">
+        <div class="pick-when">
+          <div class="q">첫 로드바이크다</div>
+          <div class="sub">정비는 맡기고 싶음</div>
+        </div>
+        <div class="pick-what">
+          <div class="m">아팔란치아 R16D 700C<span>540,000원</span></div>
+          <p>완조립으로 오고, 앞뒤 모두 시마노 클라리스이며, 전국 대리점에서 봐줍니다.
+            스펙 한두 줄을 손해 보는 대신 "타다가 문제 생기면 어디로 가지"라는 고민이 사라집니다.</p>
+        </div>
+      </div>
+      <div class="pick">
+        <div class="pick-when">
+          <div class="q">계단·지하철이 잦다</div>
+          <div class="sub">한강 위주, 비 오면 안 탐</div>
+        </div>
+        <div class="pick-what">
+          <div class="m">아팔란치아 XRS 14<span>515,000원</span></div>
+          <p>10.8kg에 사이즈 5종. 캘리퍼 브레이크를 받아들이면 가장 가볍고 저렴합니다.
+            맑은 날 한강 평지 위주라면 디스크의 이점이 크지 않습니다.</p>
+        </div>
+      </div>
+      <div class="pick">
+        <div class="pick-when">
+          <div class="q">실패하기 싫다</div>
+          <div class="sub">무게는 상관없음</div>
+        </div>
+        <div class="pick-what">
+          <div class="m">자비스 14D (2024년형)<span>530,000원</span></div>
+          <p>리뷰 10건 평점 4.9로 이 목록에서 만족도가 가장 검증된 모델입니다.
+            12.6kg이라는 무게를 감당할 수 있다면 — 즉 자전거를 들 일이 없다면 — 가장 안전한 선택입니다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>결제 전 확인할 것</h2>
+    </div>
+    <div class="notes">
+      <div class="note">
+        <h3>표시가격이 결제금액은 아닙니다</h3>
+        <p>11번가 기준 자전거 배송비가 <code>15,000~20,000원</code>입니다. 여기에 반조립이면 샵 조립비
+          2~3만원이 더 붙습니다. 최저가 522,490원짜리가 실제로는 57만원이 될 수 있습니다.</p>
+      </div>
+      <div class="note">
+        <h3>프레임 사이즈부터 맞추기</h3>
+        <p>같은 모델도 <code>380 / 440 / 470 / 510</code>처럼 사이즈가 나뉩니다.
+          대략 키 160~168cm는 440~470, 168~175cm는 470~500, 175cm 이상은 510 이상이지만
+          브랜드마다 지오메트리가 달라 <strong>반드시 판매처 사이즈표를 확인</strong>하세요.</p>
+      </div>
+      <div class="note">
+        <h3>연식이 높다고 좋은 건 아닙니다</h3>
+        <p>후보 중 2027년형과 2023년형이 섞여 있습니다. <strong>재고로 남은 지난 연식이 스펙 대비 저렴</strong>한
+          경우가 많습니다. 다만 사이즈·색상 선택폭은 좁습니다.</p>
+      </div>
+      <div class="note">
+        <h3>한강 야간 라이딩 준비물</h3>
+        <p>자전거 값 외에 전조등·후미등·헬멧·잠금장치로 <strong>7~15만원</strong>을 따로 잡으세요.
+          한강 자전거도로는 야간 이용이 많고, 도로교통법상 야간 주행 시 전조등과 미등은 의무입니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="method">
+      <h2>조사 방법과 한계</h2>
+      <p>2026년 9월 8일, Playwright로 브라우저를 직접 구동해 <strong>다나와 · 에누리 · 11번가</strong> 세 곳에서
+        "로드자전거" 검색 결과 중 50만~60만원 구간의 로드(싸이클) 카테고리만 수집했습니다.
+        스펙과 최저가는 다나와, 판매처 수와 리뷰는 에누리, 배송비와 조립 상태는 11번가 값을 사용했습니다.</p>
+      <p class="blocked">시도했으나 자동 접근이 막힌 사이트 — 네이버쇼핑 (HTTP 418), 쿠팡 (HTTP 403),
+        G마켓 (HTTP 403), 옥션 (결과 미렌더링), SSG닷컴 (결과 미렌더링), 삼천리·알톤 공식몰 (404)</p>
+      <p>가격은 조사 시점의 최저가로, 자전거 값은 시즌과 재고에 따라 수시로 바뀝니다.
+        구매 직전 반드시 다시 확인하세요. 무게·구동계 정보는 판매처 표기를 그대로 옮긴 것이며 실측값이 아닙니다.
+        리뷰가 1~3건인 모델의 평점은 표본이 작아 참고 수준으로만 보시기 바랍니다.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  한강 사이클 50만원대 비교 · 2026-09-08 조사 · 다나와, 에누리, 11번가 공개 검색 결과 기반
+</footer>
+
+</body>
+</html>
