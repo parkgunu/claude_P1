@@ -1,0 +1,14 @@
+{
+  "id": "mayonnaise",
+  "name": "마요네즈",
+  "category": "양념",
+  "quantity": 300,
+  "unit": "g",
+  "storage": "냉장",
+  "purchasedOn": "2026-06-18",
+  "expiresOn": "2027-02-18",
+  "tags": [
+    "양념"
+  ],
+  "note": ""
+}

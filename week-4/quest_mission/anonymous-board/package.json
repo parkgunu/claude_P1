@@ -1,0 +1,14 @@
+{
+  "name": "anonymous-board",
+  "version": "1.0.0",
+  "private": true,
+  "description": "속닥속닥 - 익명 게시판 (카테고리 · 공감 · 정렬, PostgreSQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.13.1"
+  }
+}

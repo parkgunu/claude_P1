@@ -1,0 +1,15 @@
+{
+  "id": "tuna-can",
+  "name": "참치캔",
+  "category": "가공육",
+  "quantity": 150,
+  "unit": "g",
+  "storage": "실온",
+  "purchasedOn": "2026-05-20",
+  "expiresOn": "2028-04-10",
+  "tags": [
+    "주재료",
+    "비상용"
+  ],
+  "note": "기름 담금"
+}

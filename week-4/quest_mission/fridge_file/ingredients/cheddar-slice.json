@@ -1,0 +1,14 @@
+{
+  "id": "cheddar-slice",
+  "name": "체다 슬라이스 치즈",
+  "category": "유제품",
+  "quantity": 6,
+  "unit": "장",
+  "storage": "냉장",
+  "purchasedOn": "2026-08-30",
+  "expiresOn": "2026-11-15",
+  "tags": [
+    "부재료"
+  ],
+  "note": ""
+}

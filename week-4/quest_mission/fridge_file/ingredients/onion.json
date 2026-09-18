@@ -1,0 +1,15 @@
+{
+  "id": "onion",
+  "name": "양파",
+  "category": "채소",
+  "quantity": 3,
+  "unit": "개",
+  "storage": "실온",
+  "purchasedOn": "2026-09-05",
+  "expiresOn": "2026-10-20",
+  "tags": [
+    "부재료",
+    "만능"
+  ],
+  "note": ""
+}

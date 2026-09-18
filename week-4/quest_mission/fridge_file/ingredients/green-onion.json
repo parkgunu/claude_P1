@@ -1,0 +1,15 @@
+{
+  "id": "green-onion",
+  "name": "대파",
+  "category": "채소",
+  "quantity": 2,
+  "unit": "대",
+  "storage": "냉장",
+  "purchasedOn": "2026-09-11",
+  "expiresOn": "2026-09-24",
+  "tags": [
+    "부재료",
+    "만능"
+  ],
+  "note": "흰 부분 많음"
+}

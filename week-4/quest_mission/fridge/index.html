@@ -1,0 +1,1628 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>우리집 냉장고</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Pretendard Variable"', 'Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            ink: '#26332f',
+            mint: { 50: '#effaf6', 100: '#d7f2e7', 200: '#b9e6d5', 300: '#9fd8c4', 400: '#7cc6ab', 500: '#56ad8f', 600: '#3f8f73', 700: '#33735d' },
+            coral: { 50: '#fff1ec', 100: '#ffdcd1', 400: '#ff8f73', 500: '#ff7a59', 600: '#ec6140' },
+          },
+        },
+      },
+    };
+  </script>
+  <!-- ⚠️ 모든 CDN 은 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 이 깨짐) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    /* 주방 타일 배경 */
+    body {
+      background-color: #f3eee4;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, .6) 1.5px, transparent 1.5px),
+        linear-gradient(90deg, rgba(255, 255, 255, .6) 1.5px, transparent 1.5px);
+      background-size: 46px 46px;
+    }
+
+    /* ── 냉장고 본체 ── */
+    .fridge-shell {
+      background: linear-gradient(150deg, #c4ebdc 0%, #9fd8c4 45%, #86c9b1 100%);
+      box-shadow:
+        inset 0 2px 0 rgba(255, 255, 255, .6),
+        0 34px 60px -24px rgba(47, 94, 79, .5),
+        0 10px 20px -10px rgba(47, 94, 79, .3);
+    }
+
+    /* ── 문 (왼쪽 경첩 기준 3D 회전) ── */
+    .compartment { perspective: 2200px; }
+    .door {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      transform-origin: left center;
+      transform-style: preserve-3d;
+      transition: transform .95s cubic-bezier(.22, .9, .25, 1);
+    }
+    /* 열린 문은 3D 로 눕지만 클릭 영역은 원래 자리에 그대로 남아, 위쪽 버튼까지 가로챈다.
+       그래서 열려 있는 동안에는 문 전체의 포인터 이벤트를 끈다 (닫기는 내부의 닫기 버튼으로). */
+    .door.is-open { transform: rotateY(-104deg); pointer-events: none; }
+    .door-face {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+    }
+    .door-front {
+      background: linear-gradient(150deg, #cdefe2 0%, #a6dcc8 55%, #90cfb8 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .75), inset 0 -3px 0 rgba(0, 0, 0, .05);
+    }
+    .door-back {
+      transform: rotateY(180deg);
+      background: linear-gradient(210deg, #f7fbfa, #d9e9e3);
+      box-shadow: inset 0 0 0 6px #a6dcc8;
+    }
+    .handle {
+      background: linear-gradient(90deg, #aab7bc 0%, #ffffff 42%, #d8e0e3 68%, #93a2a8 100%);
+      box-shadow: 0 5px 12px rgba(30, 60, 50, .22);
+    }
+    .lcd {
+      background: linear-gradient(180deg, #23302c, #1a2522);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, .5), 0 1px 0 rgba(255, 255, 255, .5);
+      color: #9ff5d4;
+      text-shadow: 0 0 8px rgba(120, 255, 200, .6);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── 내부 ── */
+    .interior {
+      background: radial-gradient(120% 60% at 50% 0%, #ffffff 0%, #eef6fa 60%, #e0edf2 100%);
+      box-shadow: inset 0 8px 18px rgba(56, 94, 110, .14), inset 0 0 0 1px rgba(255, 255, 255, .85);
+      transition: filter .7s ease;
+    }
+    .interior.frosty { background: radial-gradient(120% 70% at 50% 0%, #ffffff 0%, #e3f3fb 55%, #cfe6f3 100%); }
+    .interior.is-dark { filter: brightness(.72) saturate(.7); }
+    .led {
+      background: linear-gradient(90deg, transparent, #fffbe8 20%, #fffbe8 80%, transparent);
+      box-shadow: 0 0 22px 7px rgba(255, 247, 205, .9);
+    }
+    .shelf-glass {
+      background: linear-gradient(180deg, rgba(255, 255, 255, .98), rgba(190, 221, 234, .75));
+      box-shadow: 0 4px 8px -3px rgba(80, 120, 140, .4);
+    }
+    .drawer {
+      background: linear-gradient(180deg, rgba(220, 244, 228, .55), rgba(190, 228, 206, .75));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 -1px 0 rgba(140, 190, 170, .35);
+    }
+
+    /* ── 레시피 메모 ── */
+    .magnet { background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .95) 0 14%, var(--magnet) 42%); }
+
+    .pop-in { animation: pop .5s cubic-bezier(.2, 1.4, .4, 1) both; }
+    @keyframes pop {
+      from { transform: scale(.4) translateY(12px); opacity: 0; }
+      to { transform: none; opacity: 1; }
+    }
+    .fade-up { animation: fadeUp .25s ease-out both; }
+    @keyframes fadeUp {
+      from { transform: translateY(8px); opacity: 0; }
+      to { transform: none; opacity: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .door, .interior { transition: none; }
+      .pop-in, .fade-up { animation: none; }
+    }
+  </style>
+</head>
+<body class="font-sans text-ink antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback, useRef, useId } = React;
+
+    // ========================================
+    // ⚙️ Constants & Helpers
+    // ========================================
+
+    const API_BASE_URL = '/api';
+
+    const CATEGORIES = ['채소·과일', '육류·해산물', '유제품·계란', '음료', '소스·양념', '기타'];
+    const CATEGORY_EMOJI = {
+      '채소·과일': '🥬', '육류·해산물': '🥩', '유제품·계란': '🥛', '음료': '🧃', '소스·양념': '🧂', '기타': '📦',
+    };
+    const ZONE_LABEL = { fridge: '냉장실', freezer: '냉동실' };
+
+    // 재료 이름 키워드 → 이모지 (위에서부터 먼저 맞는 것)
+    const EMOJI_RULES = [
+      [/계란|달걀|메추리알/, '🥚'], [/우유/, '🥛'], [/치즈/, '🧀'], [/버터/, '🧈'], [/요거트|요구르트/, '🍶'],
+      [/베이컨/, '🥓'], [/닭|치킨/, '🍗'], [/돼지|삼겹|목살|소고기|쇠고기|한우|고기|햄|스팸|소시지/, '🥩'],
+      [/새우/, '🦐'], [/오징어|문어|쭈꾸미|주꾸미/, '🦑'], [/꽃게|대게|킹크랩/, '🦀'], [/조개|굴|홍합|바지락/, '🦪'],
+      [/생선|고등어|연어|참치|갈치|명태|동태|멸치/, '🐟'],
+      [/고추장|간장|된장|케첩|마요|소스|식초|굴소스/, '🥫'], [/소금|설탕|후추/, '🧂'],
+      [/양파/, '🧅'], [/마늘/, '🧄'], [/당근/, '🥕'], [/고구마/, '🍠'], [/감자/, '🥔'], [/토마토/, '🍅'], [/오이/, '🥒'],
+      [/브로콜리/, '🥦'], [/버섯/, '🍄'], [/파프리카|피망/, '🫑'], [/고추/, '🌶️'], [/옥수수/, '🌽'],
+      [/대파|쪽파|부추|미나리/, '🌿'], [/상추|양배추|배추|시금치|김치|깻잎|양상추/, '🥬'],
+      [/아보카도/, '🥑'], [/사과/, '🍎'], [/바나나/, '🍌'], [/딸기/, '🍓'], [/레몬|라임/, '🍋'], [/포도/, '🍇'],
+      [/수박/, '🍉'], [/귤|오렌지|한라봉/, '🍊'], [/복숭아/, '🍑'], [/블루베리/, '🫐'], [/키위/, '🥝'],
+      [/맥주/, '🍺'], [/와인/, '🍷'], [/주스/, '🧃'], [/콜라|사이다|탄산/, '🥤'], [/커피/, '☕'],
+      [/만두/, '🥟'], [/아이스크림/, '🍨'], [/빵|식빵/, '🍞'], [/떡/, '🍡'], [/밥/, '🍚'], [/라면|국수|우동|파스타/, '🍜'],
+    ];
+
+    function ingredientEmoji(name, category) {
+      const rule = EMOJI_RULES.find(([re]) => re.test(name));
+      return rule ? rule[1] : CATEGORY_EMOJI[category] || '📦';
+    }
+
+    // ── 이모지에 없는 재료용 SVG 아이콘 ──────────────────────────────
+    // 김치·배추·양배추·무·콩나물·애호박·두부 처럼 이모지가 전부 🥬 로 겹치는 것들을 직접 그린다.
+    const ICON_SVGS = {
+      // 김치 — 빨갛게 버무린 포기 한 쪽 (아래는 하얀 줄기, 위는 양념 묻은 잎)
+      kimchi: (
+        <>
+          <path d="M15 30h18c1.2 5-2.6 12-9 12s-10.2-7-9-12Z" fill="#fdf6ea" stroke="#e6d8c0" strokeWidth="1.5" />
+          <path d="M24 4c3.4 0 5.8 2.6 7.4 6.6 1.8 4.6 2.8 12 2.8 21.4H13.8c0-9.4 1-16.8 2.8-21.4C18.2 6.6 20.6 4 24 4Z" fill="#dd4326" />
+          <path d="M24 4c-2.2 2.4-3.4 6-3.4 10.6 0 7.6.4 13.6.4 17.4h-7.2c0-9.4 1-16.8 2.8-21.4C18.2 6.6 20.6 4 24 4Z" fill="#ef6a45" />
+          <path d="M19 12c-.8 6.4-1 13.4-1 20M24 10.5c0 7-.2 14-.2 21.5M29 12c.8 6.4 1 13.4 1 20" stroke="#f9c0ac" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+          <circle cx="20" cy="22" r="1.3" fill="#a92a15" />
+          <circle cx="28.5" cy="17" r="1.2" fill="#a92a15" />
+          <circle cx="26" cy="27" r="1.1" fill="#a92a15" />
+        </>
+      ),
+      // 배추 — 속이 노란 알배기
+      napa: (
+        <>
+          <path d="M24 10c7.5 0 12 4 12 11 0 10.5-1.8 19.5-4.4 24.5-1.4 2.7-4.3 2.3-7.6 2.3s-6.2.4-7.6-2.3C13.8 40.5 12 31.5 12 21c0-7 4.5-11 12-11Z" fill="#e6f0c2" stroke="#c3d78f" strokeWidth="1.5" />
+          <path d="M24 12.5c3.6 0 5.6 3 5.6 8.5 0 9.6-.8 18-2 22.8-.5 2.2-1.7 2.2-3.6 2.2s-3.1 0-3.6-2.2c-1.2-4.8-2-13.2-2-22.8 0-5.5 2-8.5 5.6-8.5Z" fill="#fbfae4" stroke="#dde7b4" strokeWidth="1.2" />
+          <path d="M15 8c-2.6 3.4-2.2 7.4.8 11 1.4-4 2.6-7 4.2-9.2C18.6 8.6 16.9 8 15 8Zm18 0c2.6 3.4 2.2 7.4-.8 11-1.4-4-2.6-7-4.2-9.2C29.4 8.6 31.1 8 33 8ZM24 4c2.8 0 5 2.2 5.8 6-1.8 1-3.8 1.6-5.8 1.6s-4-.6-5.8-1.6C19 6.2 21.2 4 24 4Z" fill="#7cb83a" />
+          <path d="M24 14v30" stroke="#dbe7ab" strokeWidth="1.6" strokeLinecap="round" />
+        </>
+      ),
+      // 양배추 — 동그랗게 말린 통
+      cabbage: (
+        <>
+          <circle cx="24" cy="25" r="17" fill="#c3e5a4" stroke="#8fc16c" strokeWidth="1.5" />
+          <path d="M24 9c-7 3.4-10.6 9-10.6 16.6 0 5.6 2.8 10 7 12.6M24 9c7 3.4 10.6 9 10.6 16.6 0 5.6-2.8 10-7 12.6" stroke="#8cc76a" strokeWidth="2" fill="none" strokeLinecap="round" />
+          <ellipse cx="24" cy="23" rx="5.4" ry="7.4" fill="#e9f6d9" stroke="#b6d999" strokeWidth="1.2" />
+          <path d="M24 17.5v11" stroke="#b6d999" strokeWidth="1.4" strokeLinecap="round" />
+        </>
+      ),
+      // 무 — 잎 달린 하얀 무
+      radish: (
+        <>
+          <path d="M23 14c-1.6-5.4-5.6-8.8-10.4-8.6.6 4.8 3.8 8 8.4 9.2Zm2 0c1.6-5.4 5.6-8.8 10.4-8.6-.6 4.8-3.8 8-8.4 9.2Z" fill="#6fbf4a" />
+          <path d="M24 16V6.5" stroke="#4e9a31" strokeWidth="2" strokeLinecap="round" />
+          <path d="M24 13.5c5.8 0 9.6 3.6 9.6 9.2 0 7.8-4.9 15.6-9.6 22.3-4.7-6.7-9.6-14.5-9.6-22.3 0-5.6 3.8-9.2 9.6-9.2Z" fill="#fcfcf7" stroke="#c6d1c7" strokeWidth="1.6" />
+          <path d="M18 22.5h12M18.8 28.5h10.4M20.5 34.5h7" stroke="#d8e0d8" strokeWidth="1.6" strokeLinecap="round" />
+        </>
+      ),
+      // 콩나물 — 노란 머리에 하얀 줄기
+      sprouts: (
+        <>
+          <path d="M19 43c-1.5-9-1-16 2-22M24 44c0-10 .2-17 .2-23M29 43c1.5-9 1-16-2-22" stroke="#dfe3cd" strokeWidth="3.2" strokeLinecap="round" fill="none" />
+          <circle cx="19.5" cy="19" r="4.4" fill="#f0cf49" stroke="#d9b62f" strokeWidth="1" />
+          <circle cx="28.5" cy="19" r="4.4" fill="#f0cf49" stroke="#d9b62f" strokeWidth="1" />
+          <circle cx="24" cy="14.5" r="4.8" fill="#f8e488" stroke="#d9b62f" strokeWidth="1" />
+          <path d="M24 10.5c1.8-3 4.4-4 7-3.4-1 2.8-3.4 4.4-6 4.4Z" fill="#8cc63f" />
+        </>
+      ),
+      // 애호박 — 비스듬히 누운 호박
+      zucchini: (
+        <g transform="rotate(-35 24 24)">
+          <rect x="16" y="9" width="16" height="32" rx="8" fill="#9ed36a" />
+          <rect x="20" y="14" width="4.5" height="19" rx="2.2" fill="#bde596" />
+          <rect x="21.5" y="4" width="5" height="7" rx="2.5" fill="#6aa23c" />
+        </g>
+      ),
+      // 두부 — 하얀 모 한 판
+      tofu: (
+        <>
+          <path d="M24 10 40 19 24 28 8 19l16-9Z" fill="#fffdf4" stroke="#cfc9b2" strokeWidth="1.4" strokeLinejoin="round" />
+          <path d="M8 19v10l16 9V28L8 19Z" fill="#eee9d5" stroke="#cfc9b2" strokeWidth="1.4" strokeLinejoin="round" />
+          <path d="M40 19v10l-16 9V28l16-9Z" fill="#ddd7c0" stroke="#cfc9b2" strokeWidth="1.4" strokeLinejoin="round" />
+        </>
+      ),
+      // 떡국떡 — 어슷 썬 가래떡
+      ricecake: (
+        <>
+          <ellipse cx="16" cy="30" rx="10" ry="7" fill="#fdfbf3" stroke="#d3ccb6" strokeWidth="1.6" transform="rotate(-16 16 30)" />
+          <ellipse cx="25" cy="24" rx="10" ry="7" fill="#fffdf7" stroke="#d3ccb6" strokeWidth="1.6" transform="rotate(-16 25 24)" />
+          <ellipse cx="33" cy="32" rx="10" ry="7" fill="#fdfbf3" stroke="#d3ccb6" strokeWidth="1.6" transform="rotate(-16 33 32)" />
+        </>
+      ),
+      // 미역 — 흐늘거리는 줄기
+      seaweed: (
+        <>
+          <path d="M18 44c-3-10-2-18 1-24 2-4 2-8 0-12 5 2 8 6 7 12-1 7-5 14-4 24Z" fill="#2f6b52" />
+          <path d="M31 44c2-9 1-16-1-21-1.6-4-1.4-7 .6-10-4.6 1.6-7 5-6.6 10 .4 6 3.6 12 3 21Z" fill="#469070" opacity=".85" />
+        </>
+      ),
+    };
+
+    // 이름 → SVG 아이콘 (이모지보다 먼저 확인한다. 순서 주의: 양배추 가 배추 보다 앞)
+    const ICON_RULES = [
+      [/김치/, 'kimchi'],
+      [/양배추|양상추|적채/, 'cabbage'],
+      [/배추|얼갈이/, 'napa'],
+      [/^무$|^무\s|총각무|무말랭이/, 'radish'],
+      [/콩나물|숙주/, 'sprouts'],
+      [/애호박|단호박|호박|주키니/, 'zucchini'],
+      [/두부|유부/, 'tofu'],
+      [/떡국떡|가래떡|떡볶이떡|절편/, 'ricecake'],
+      [/미역|다시마|파래/, 'seaweed'],
+    ];
+
+    // 재료 아이콘 — 전용 SVG 가 있으면 그것을, 없으면 이모지를 쓴다
+    function IngredientIcon({ name, category, size = 'md', className = '' }) {
+      const box = { sm: 'h-5', md: 'h-9', lg: 'h-12' }[size];
+      const icon = { sm: 'h-5 w-5', md: 'h-9 w-9', lg: 'h-11 w-11' }[size];
+      const text = { sm: 'text-base', md: 'text-3xl', lg: 'text-4xl' }[size];
+      const rule = ICON_RULES.find(([re]) => re.test(name));
+      return (
+        <span className={`flex ${box} items-center justify-center ${className}`} aria-hidden="true">
+          {rule ? (
+            <svg viewBox="0 0 48 48" className={icon} focusable="false">{ICON_SVGS[rule[1]]}</svg>
+          ) : (
+            <span className={`${text} leading-none`}>{ingredientEmoji(name, category)}</span>
+          )}
+        </span>
+      );
+    }
+
+    // 유통기한 D-day 계산 (로컬 날짜 기준)
+    function getDday(expiresOn) {
+      if (!expiresOn) return null;
+      const [y, m, d] = expiresOn.split('-').map(Number);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diff = Math.round((new Date(y, m - 1, d) - today) / 86400000);
+      if (diff < 0) return { diff, label: `${-diff}일 지남`, tone: 'bg-rose-500 text-white' };
+      if (diff === 0) return { diff, label: 'D-DAY', tone: 'bg-coral-500 text-white' };
+      if (diff <= 3) return { diff, label: `D-${diff}`, tone: 'bg-amber-400 text-amber-950' };
+      return { diff, label: `D-${diff}`, tone: 'bg-white text-slate-500 ring-1 ring-slate-200' };
+    }
+
+    // 레시피 재료가 냉장고에 있는지 (공백 무시, 부분 일치 — 한 글자는 완전 일치만)
+    const normalize = (s) => s.replace(/\s+/g, '').toLowerCase();
+    function hasIngredient(recipeIngredient, fridgeNames) {
+      const r = normalize(recipeIngredient);
+      return fridgeNames.some((n) =>
+        n === r || (n.length >= 2 && r.includes(n)) || (r.length >= 2 && n.includes(r))
+      );
+    }
+
+    // 유통기한 임박순 → 최근 등록순 (서버 정렬과 동일)
+    function sortIngredients(list) {
+      return [...list].sort((a, b) => {
+        if (a.expiresOn !== b.expiresOn) {
+          if (!a.expiresOn) return 1;
+          if (!b.expiresOn) return -1;
+          return a.expiresOn < b.expiresOn ? -1 : 1;
+        }
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
+    }
+
+    const parseSteps = (steps) =>
+      steps.split('\n').map((s) => s.replace(/^\s*\d+\s*[.)]\s*/, '').trim()).filter(Boolean);
+
+    const formatDate = (iso) =>
+      new Date(iso).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const NOTE_STYLES = [
+      { bg: 'bg-[#fff4b8]', magnet: '#ff7a59' },
+      { bg: 'bg-[#ffdcdc]', magnet: '#56ad8f' },
+      { bg: 'bg-[#d9edff]', magnet: '#f5b700' },
+      { bg: 'bg-[#e3f6cc]', magnet: '#7a6cf0' },
+      { bg: 'bg-[#ece0ff]', magnet: '#ff5d8f' },
+    ];
+    const NOTE_TILT = ['-rotate-1', 'rotate-1', 'rotate-0', 'rotate-[1.5deg]', '-rotate-[1.5deg]'];
+
+    // ========================================
+    // 📡 API
+    // ========================================
+
+    async function api(endpoint, options = {}) {
+      let res;
+      try {
+        res = await fetch(`${API_BASE_URL}${endpoint}`, {
+          ...options,
+          headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        });
+      } catch (_err) {
+        throw new Error('서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해 주세요.');
+      }
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (_err) {
+        // JSON 이 아닌 응답
+      }
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.message || `요청에 실패했습니다. (${res.status})`);
+      }
+      return body.data;
+    }
+
+    // 목록 조회 + 로컬 갱신용 setData 를 함께 돌려주는 훅
+    function useCollection(endpoint) {
+      const [data, setData] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      const reload = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          setData(await api(endpoint));
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      }, [endpoint]);
+
+      useEffect(() => { reload(); }, [reload]);
+
+      return { data, setData, loading, error, reload };
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, type = 'button', className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-coral-500 text-white shadow-[0_6px_16px_-6px_rgba(255,122,89,.8)] hover:bg-coral-600',
+        secondary: 'bg-white text-ink ring-1 ring-slate-900/10 shadow-sm hover:bg-slate-50',
+        mint: 'bg-mint-600 text-white shadow-[0_6px_16px_-6px_rgba(63,143,115,.8)] hover:bg-mint-700',
+        danger: 'bg-rose-500 text-white hover:bg-rose-600',
+        ghost: 'text-slate-600 hover:bg-slate-900/5',
+      };
+      const sizes = {
+        sm: 'h-8 px-3 text-xs gap-1',
+        md: 'h-10 px-4 text-sm gap-1.5',
+        lg: 'h-12 px-6 text-base gap-2',
+      };
+      return (
+        <button
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center rounded-full font-semibold transition active:scale-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Field({ label, error, hint, htmlFor, children, className = '' }) {
+      return (
+        <div className={className}>
+          {label && <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</label>}
+          {children}
+          {error ? (
+            <p className="mt-1.5 text-xs font-medium text-rose-600" role="alert">{error}</p>
+          ) : hint ? (
+            <p className="mt-1.5 text-xs text-slate-400">{hint}</p>
+          ) : null}
+        </div>
+      );
+    }
+
+    const controlClass = (error) =>
+      `w-full rounded-2xl border bg-white px-4 text-sm text-ink placeholder:text-slate-400 transition focus:outline-none focus:ring-4 disabled:bg-slate-50 ${
+        error ? 'border-rose-300 focus:ring-rose-100' : 'border-slate-200 focus:border-mint-400 focus:ring-mint-100'
+      }`;
+
+    function Input({ label, error, hint, className = '', ...props }) {
+      const id = useId();
+      return (
+        <Field label={label} error={error} hint={hint} htmlFor={id} className={className}>
+          <input id={id} className={`${controlClass(error)} h-11`} aria-invalid={!!error} {...props} />
+        </Field>
+      );
+    }
+
+    function Textarea({ label, error, hint, className = '', ...props }) {
+      const id = useId();
+      return (
+        <Field label={label} error={error} hint={hint} htmlFor={id} className={className}>
+          <textarea id={id} className={`${controlClass(error)} resize-y py-3 leading-relaxed`} aria-invalid={!!error} {...props} />
+        </Field>
+      );
+    }
+
+    function ChipGroup({ label, options, value, onChange, className = '' }) {
+      return (
+        <fieldset className={className}>
+          <legend className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</legend>
+          <div className="flex flex-wrap gap-2">
+            {options.map((opt) => {
+              const active = opt.value === value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onChange(opt.value)}
+                  className={`rounded-full px-3.5 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint-400 ${
+                    active ? 'bg-ink text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`rounded-3xl bg-white/80 p-5 shadow-sm ring-1 ring-slate-900/5 backdrop-blur ${className}`}>{children}</div>;
+    }
+
+    function Badge({ tone = 'slate', className = '', children }) {
+      const tones = {
+        slate: 'bg-slate-100 text-slate-600',
+        mint: 'bg-mint-100 text-mint-700',
+        coral: 'bg-coral-50 text-coral-600',
+        amber: 'bg-amber-100 text-amber-800',
+      };
+      return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${tones[tone]} ${className}`}>{children}</span>;
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children, footer }) {
+      const onCloseRef = useRef(onClose);
+      onCloseRef.current = onClose;
+
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onCloseRef.current();
+        document.addEventListener('keydown', onKey);
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+          document.removeEventListener('keydown', onKey);
+          document.body.style.overflow = prevOverflow;
+        };
+      }, [isOpen]);
+
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
+          <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={onClose} />
+          <div className={`fade-up relative flex max-h-[92vh] w-full flex-col rounded-t-[28px] bg-[#fbfaf7] shadow-2xl sm:rounded-[28px] ${sizes[size]}`}>
+            <div className="flex items-center justify-between gap-4 px-6 pb-2 pt-5">
+              <h2 className="text-lg font-bold">{title}</h2>
+              <button type="button" onClick={onClose} aria-label="닫기" className="grid h-9 w-9 place-items-center rounded-full text-xl text-slate-400 hover:bg-slate-900/5 hover:text-slate-700">×</button>
+            </div>
+            <div className="overflow-y-auto px-6 pb-6 pt-2">{children}</div>
+            {footer && <div className="flex justify-end gap-2 border-t border-slate-900/5 px-6 py-4">{footer}</div>}
+          </div>
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return <span className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent ${className}`} aria-hidden="true" />;
+    }
+
+    // ========================================
+    // 🧩 Common / Layout Components
+    // ========================================
+
+    function Header({ fridgeCount, freezerCount, recipeCount }) {
+      return (
+        <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 pt-6 sm:pt-10">
+          <div className="flex items-center gap-3">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-mint-300 text-2xl shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-6px_rgba(47,94,79,.6)]" aria-hidden="true">🧊</div>
+            <div>
+              <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">우리집 냉장고</h1>
+              <p className="text-sm text-slate-500">재료는 냉장고 안에, 레시피는 메모로 붙여두세요</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2" aria-label="보관 현황">
+            <Badge tone="mint">🧊 냉장 {fridgeCount}</Badge>
+            <Badge tone="slate">❄️ 냉동 {freezerCount}</Badge>
+            <Badge tone="coral">📒 레시피 {recipeCount}</Badge>
+          </div>
+        </header>
+      );
+    }
+
+    function Toast({ toast }) {
+      return (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4" aria-live="polite">
+          {toast && (
+            <div key={toast.id} className={`fade-up rounded-full px-5 py-3 text-sm font-semibold text-white shadow-xl ${toast.type === 'error' ? 'bg-rose-600' : 'bg-ink'}`}>
+              {toast.message}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧊 Fridge Components
+    // ========================================
+
+    function IngredientTile({ item, onDelete, isNew }) {
+      const dday = getDday(item.expiresOn);
+      return (
+        <div
+          className={`group relative w-[74px] rounded-2xl bg-white/95 px-1.5 pb-2 pt-3.5 text-center shadow-[0_4px_10px_-4px_rgba(40,80,90,.35)] ring-1 ring-slate-900/5 sm:w-[84px] ${isNew ? 'pop-in' : ''}`}
+          title={`${item.name}${item.quantity ? ` · ${item.quantity}` : ''}${item.expiresOn ? ` · ~${item.expiresOn}` : ''}`}
+        >
+          {dday && (
+            <span className={`absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${dday.tone}`}>
+              {dday.label}
+            </span>
+          )}
+          <IngredientIcon name={item.name} category={item.category} />
+          <span className="mt-1.5 block truncate text-xs font-semibold text-slate-700">{item.name}</span>
+          <span className="block h-3.5 truncate text-[10px] text-slate-400">{item.quantity}</span>
+          <button
+            type="button"
+            onClick={() => onDelete(item)}
+            aria-label={`${item.name} 삭제`}
+            className="absolute -right-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full bg-ink text-sm leading-none text-white shadow transition hover:bg-rose-500 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral-400 sm:opacity-0 sm:group-hover:opacity-100"
+          >
+            ×
+          </button>
+        </div>
+      );
+    }
+
+    function Shelf({ label, items, onDelete, newId }) {
+      return (
+        <div>
+          <p className="mb-2 px-1 text-[11px] font-bold tracking-wide text-slate-400">{CATEGORY_EMOJI[label]} {label}</p>
+          <div className="flex flex-wrap gap-x-2 gap-y-3 px-1">
+            {items.map((item) => (
+              <IngredientTile key={item.id} item={item} onDelete={onDelete} isNew={item.id === newId} />
+            ))}
+          </div>
+          <div className="shelf-glass mt-3 h-2 rounded-full" aria-hidden="true" />
+        </div>
+      );
+    }
+
+    function InteriorState({ loading, error, onRetry, emptyText, onAdd }) {
+      if (loading) {
+        return (
+          <div className="flex flex-wrap gap-2 px-1" aria-label="불러오는 중">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-[86px] w-[74px] animate-pulse rounded-2xl bg-white/70 sm:w-[84px]" />
+            ))}
+          </div>
+        );
+      }
+      if (error) {
+        return (
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <p className="text-sm font-medium text-rose-600">{error}</p>
+            <Button size="sm" variant="secondary" onClick={onRetry}>다시 시도</Button>
+          </div>
+        );
+      }
+      return (
+        <div className="flex flex-col items-center gap-2 py-6 text-center">
+          <p className="text-sm text-slate-400">{emptyText}</p>
+          {onAdd && <Button size="sm" variant="secondary" onClick={onAdd}>+ 재료 넣기</Button>}
+        </div>
+      );
+    }
+
+    // 문 + 내부를 가진 한 칸 (냉동실/냉장실)
+    function Compartment({ id, title, isOpen, onToggle, front, frosty, className = '', children }) {
+      const interiorRef = useRef(null);
+
+      // 닫힌 문 뒤의 버튼들이 키보드 포커스를 받지 않게 한다
+      useEffect(() => {
+        if (interiorRef.current) interiorRef.current.inert = !isOpen;
+      }, [isOpen]);
+
+      return (
+        <section className={`compartment relative rounded-[26px] ${className}`} aria-label={title}>
+          <div
+            id={`${id}-interior`}
+            ref={interiorRef}
+            className={`interior relative h-full rounded-[26px] px-3 pb-4 pt-6 sm:px-4 ${frosty ? 'frosty' : ''} ${isOpen ? '' : 'is-dark'}`}
+          >
+            <div className={`led absolute left-1/2 top-2 h-1 w-1/3 -translate-x-1/2 rounded-full transition-opacity duration-700 ${isOpen ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true" />
+            {isOpen && (
+              <button
+                type="button"
+                onClick={onToggle}
+                aria-label={`${title} 문 닫기`}
+                className="absolute right-2 top-2 z-20 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-500 shadow-sm ring-1 ring-slate-900/5 transition hover:bg-white hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint-400"
+              >
+                문 닫기
+              </button>
+            )}
+            {children}
+          </div>
+
+          <div className={`door rounded-[26px] ${isOpen ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={isOpen}
+              aria-controls={`${id}-interior`}
+              aria-label={`${title} 문 ${isOpen ? '닫기' : '열기'}`}
+              className="door-face door-front block w-full text-left focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-coral-400/60"
+              tabIndex={isOpen ? -1 : 0}
+            >
+              {front}
+            </button>
+            <div className="door-face door-back cursor-pointer p-4" onClick={onToggle} aria-hidden="true">
+              <div className="flex h-full flex-col justify-around gap-3">
+                <div className="h-6 rounded-lg bg-white/70 shadow-inner" />
+                <div className="h-6 rounded-lg bg-white/70 shadow-inner" />
+              </div>
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    function DoorHandle({ className = '' }) {
+      return <span className={`handle absolute right-4 w-3 rounded-full ${className}`} aria-hidden="true" />;
+    }
+
+    function Fridge({ ingredients, loading, error, onRetry, doors, onToggleDoor, onDelete, onAdd, newId, expiringCount }) {
+      const freezerItems = ingredients.filter((i) => i.zone === 'freezer');
+      const fridgeItems = ingredients.filter((i) => i.zone === 'fridge');
+      const produce = fridgeItems.filter((i) => i.category === '채소·과일');
+      const shelves = CATEGORIES
+        .filter((c) => c !== '채소·과일')
+        .map((c) => ({ category: c, items: fridgeItems.filter((i) => i.category === c) }))
+        .filter((s) => s.items.length);
+      const showState = loading || error;
+
+      return (
+        <div className="relative mx-auto w-full max-w-[520px] pb-6">
+          <div className="fridge-shell flex flex-col gap-2.5 rounded-[36px] p-2.5 sm:p-3">
+            {/* ── 냉동실 ── */}
+            <Compartment
+              id="freezer"
+              title="냉동실"
+              frosty
+              isOpen={doors.freezer}
+              onToggle={() => onToggleDoor('freezer')}
+              className="min-h-[180px]"
+              front={
+                <span className="block h-full p-5">
+                  <span className="block text-[11px] font-extrabold tracking-[.35em] text-mint-700/70">FRESH · CO</span>
+                  <span className="lcd mt-3 inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-mono text-sm font-bold">❄ -18°C</span>
+                  <span className="absolute bottom-5 left-5 text-xs font-semibold text-mint-700/80">냉동 {freezerItems.length}개 · 탭해서 열기</span>
+                  <DoorHandle className="bottom-6 h-16" />
+                </span>
+              }
+            >
+              <p className="mb-2 px-1 text-[11px] font-bold tracking-wide text-sky-500/80">❄️ 냉동실</p>
+              {showState || !freezerItems.length ? (
+                <InteriorState loading={loading} error={error} onRetry={onRetry} emptyText="냉동실이 비어 있어요" />
+              ) : (
+                <div className="flex flex-wrap gap-x-2 gap-y-3 px-1 pt-1">
+                  {freezerItems.map((item) => (
+                    <IngredientTile key={item.id} item={item} onDelete={onDelete} isNew={item.id === newId} />
+                  ))}
+                </div>
+              )}
+            </Compartment>
+
+            {/* ── 냉장실 ── */}
+            <Compartment
+              id="fridge"
+              title="냉장실"
+              isOpen={doors.fridge}
+              onToggle={() => onToggleDoor('fridge')}
+              className="min-h-[430px]"
+              front={
+                <span className="block h-full p-5">
+                  <span className="lcd inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-mono text-sm font-bold">● 3°C</span>
+                  <DoorHandle className="top-6 h-28" />
+                  <span className="absolute left-6 top-24 block w-40 -rotate-3 rounded-md bg-[#fff4b8] p-3 text-left shadow-md">
+                    <span className="magnet absolute -top-2 left-1/2 block h-4 w-4 -translate-x-1/2 rounded-full" style={{ '--magnet': '#ff7a59' }} />
+                    <span className="block text-xs font-bold text-slate-700">오늘의 냉장고</span>
+                    <span className="mt-1 block text-[11px] leading-5 text-slate-600">
+                      냉장 {fridgeItems.length}개 · 냉동 {freezerItems.length}개
+                      {expiringCount > 0 && <span className="block font-bold text-coral-600">⚠ 유통기한 임박 {expiringCount}개</span>}
+                    </span>
+                  </span>
+                  <span className="absolute right-12 top-44 text-3xl drop-shadow" aria-hidden="true">🍋</span>
+                  <span className="absolute bottom-24 left-10 rotate-12 text-3xl drop-shadow" aria-hidden="true">🥑</span>
+                  <span className="absolute bottom-5 left-5 text-xs font-semibold text-mint-700/80">손잡이를 당겨 열어보세요</span>
+                </span>
+              }
+            >
+              <div className="flex h-full flex-col gap-4">
+                <div className="flex-1 space-y-4">
+                  {showState ? (
+                    <InteriorState loading={loading} error={error} onRetry={onRetry} />
+                  ) : shelves.length ? (
+                    shelves.map((s) => (
+                      <Shelf key={s.category} label={s.category} items={s.items} onDelete={onDelete} newId={newId} />
+                    ))
+                  ) : (
+                    <InteriorState emptyText="냉장실 선반이 텅 비었어요 🍃" onAdd={onAdd} />
+                  )}
+                </div>
+
+                {/* 채소칸 서랍 */}
+                {!showState && (
+                  <div className="drawer rounded-2xl px-2 pb-3 pt-2.5">
+                    <p className="mb-2 px-1 text-[11px] font-bold tracking-wide text-mint-700/80">🥬 채소·과일 칸</p>
+                    {produce.length ? (
+                      <div className="flex flex-wrap gap-x-2 gap-y-3 px-1 pt-1">
+                        {produce.map((item) => (
+                          <IngredientTile key={item.id} item={item} onDelete={onDelete} isNew={item.id === newId} />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="px-1 py-2 text-xs text-mint-700/60">서랍이 비어 있어요</p>
+                    )}
+                    <div className="mx-auto mt-3 h-1.5 w-16 rounded-full bg-white/80" aria-hidden="true" />
+                  </div>
+                )}
+              </div>
+            </Compartment>
+          </div>
+
+          {/* 받침대 */}
+          <div className="mx-auto flex w-[80%] justify-between px-6" aria-hidden="true">
+            <span className="h-3 w-8 rounded-b-lg bg-[#6fa893]" />
+            <span className="h-3 w-8 rounded-b-lg bg-[#6fa893]" />
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📒 Recipe Components
+    // ========================================
+
+    function RecipeNote({ recipe, index, onOpen }) {
+      const style = NOTE_STYLES[recipe.id % NOTE_STYLES.length];
+      const tilt = NOTE_TILT[index % NOTE_TILT.length];
+      const total = recipe.ingredients.length;
+      const ratio = total ? recipe.haveCount / total : 0;
+
+      return (
+        <button
+          type="button"
+          onClick={() => onOpen(recipe)}
+          className={`relative w-full rounded-md p-4 pt-5 text-left shadow-[0_10px_20px_-12px_rgba(40,50,45,.5)] transition hover:z-10 hover:rotate-0 hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-coral-400/60 ${style.bg} ${tilt}`}
+        >
+          <span className="magnet absolute -top-2.5 left-1/2 block h-5 w-5 -translate-x-1/2 rounded-full shadow" style={{ '--magnet': style.magnet }} aria-hidden="true" />
+          <span className="flex items-center gap-1.5">
+            {recipe.source === 'ai' && (
+              <span className="shrink-0 rounded-full bg-ink/85 px-1.5 py-0.5 text-[10px] font-bold text-white" title="AI가 만든 레시피">🤖 AI</span>
+            )}
+            <span className="min-w-0 flex-1 truncate text-base font-extrabold text-slate-800">{recipe.title}</span>
+          </span>
+          <span className="mt-2 flex flex-wrap gap-1">
+            {recipe.ingredients.slice(0, 5).map((ing, i) => (
+              <span key={ing} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${recipe.matched[i] ? 'bg-white/90 text-mint-700' : 'bg-white/40 text-slate-500'}`}>
+                {recipe.matched[i] ? '✓ ' : ''}{ing}
+              </span>
+            ))}
+            {total > 5 && <span className="rounded-full bg-white/40 px-2 py-0.5 text-[11px] font-semibold text-slate-500">+{total - 5}</span>}
+          </span>
+          <span className="mt-3 block">
+            <span className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+              <span>냉장고 재료 {recipe.haveCount}/{total}</span>
+              <span>{parseSteps(recipe.steps).length}단계</span>
+            </span>
+            <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-white/60">
+              <span className="block h-full rounded-full bg-mint-500 transition-all" style={{ width: `${ratio * 100}%` }} />
+            </span>
+          </span>
+        </button>
+      );
+    }
+
+    function RecipeBoard({ recipes, loading, error, onRetry, onCreate, onOpen, onAiCreate, aiReady, generating }) {
+      const [query, setQuery] = useState('');
+      const [sort, setSort] = useState('latest');
+
+      const visible = useMemo(() => {
+        const q = normalize(query);
+        const filtered = q
+          ? recipes.filter((r) => normalize(r.title).includes(q) || r.ingredients.some((i) => normalize(i).includes(q)))
+          : recipes;
+        if (sort === 'cookable') {
+          const score = (r) => (r.ingredients.length ? r.haveCount / r.ingredients.length : 0);
+          return [...filtered].sort((a, b) => score(b) - score(a) || b.haveCount - a.haveCount);
+        }
+        return filtered;
+      }, [recipes, query, sort]);
+
+      return (
+        <section aria-labelledby="recipe-title" className="min-w-0">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 id="recipe-title" className="text-xl font-extrabold">📒 레시피 메모</h2>
+              <p className="text-sm text-slate-500">초록 체크는 지금 냉장고에 있는 재료예요</p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="mint"
+                onClick={onAiCreate}
+                disabled={generating}
+                title={aiReady ? '냉장고 재료로 AI가 레시피를 만들어 줍니다' : '서버에 ANTHROPIC_API_KEY 가 설정되지 않았습니다'}
+                className={aiReady ? '' : 'opacity-60'}
+              >
+                {generating ? <><Spinner /> 만드는 중…</> : '🤖 AI 레시피'}
+              </Button>
+              <Button variant="secondary" onClick={onCreate}>✏️ 레시피 쓰기</Button>
+            </div>
+          </div>
+
+          {!aiReady && (
+            <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800 ring-1 ring-amber-200">
+              🔑 AI 레시피를 쓰려면 서버 <code className="rounded bg-amber-100 px-1 py-0.5 text-[13px]">.env</code> 에 <b>ANTHROPIC_API_KEY</b> 를 추가해 주세요. 추가한 뒤 버튼을 다시 누르면 바로 켜집니다.
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="요리명이나 재료로 찾기"
+              aria-label="레시피 검색"
+              className={`${controlClass()} h-10 flex-1 rounded-full`}
+            />
+            <div className="flex rounded-full bg-white p-1 ring-1 ring-slate-200" role="group" aria-label="정렬">
+              {[['latest', '최신순'], ['cookable', '만들기 쉬운순']].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={sort === key}
+                  onClick={() => setSort(key)}
+                  className={`flex-1 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition sm:flex-none ${sort === key ? 'bg-ink text-white' : 'text-slate-500 hover:text-ink'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6">
+            {loading ? (
+              <div className="grid gap-5 sm:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-36 animate-pulse rounded-md bg-white/60" />)}
+              </div>
+            ) : error ? (
+              <Card className="flex flex-col items-center gap-3 py-10 text-center">
+                <p className="text-sm font-medium text-rose-600">{error}</p>
+                <Button size="sm" variant="secondary" onClick={onRetry}>다시 시도</Button>
+              </Card>
+            ) : !recipes.length ? (
+              <Card className="flex flex-col items-center gap-3 border-2 border-dashed border-slate-300 bg-white/40 py-12 text-center shadow-none ring-0">
+                <span className="text-4xl" aria-hidden="true">🗒️</span>
+                <p className="font-semibold">아직 붙여둔 레시피가 없어요</p>
+                <p className="text-sm text-slate-500">자주 해먹는 요리를 메모로 남겨보세요</p>
+                <div className="mt-1 flex flex-wrap justify-center gap-2">
+                  <Button size="sm" variant="mint" onClick={onAiCreate} disabled={generating} className={aiReady ? '' : 'opacity-60'}>
+                    {generating ? <><Spinner /> 만드는 중…</> : '🤖 AI에게 맡기기'}
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={onCreate}>직접 쓰기</Button>
+                </div>
+              </Card>
+            ) : !visible.length ? (
+              <p className="py-10 text-center text-sm text-slate-500">‘{query}’에 맞는 레시피가 없어요</p>
+            ) : (
+              <div className="grid gap-x-5 gap-y-7 pt-2 sm:grid-cols-2">
+                {visible.map((r, i) => <RecipeNote key={r.id} recipe={r} index={i} onOpen={onOpen} />)}
+              </div>
+            )}
+          </div>
+        </section>
+      );
+    }
+
+    function RecipeDetailModal({ recipe, onClose, onDelete }) {
+      if (!recipe) return null;
+      const steps = parseSteps(recipe.steps);
+      const missing = recipe.ingredients.filter((_, i) => !recipe.matched[i]);
+
+      return (
+        <Modal
+          isOpen
+          onClose={onClose}
+          title={recipe.title}
+          size="lg"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => onDelete(recipe)} className="mr-auto text-rose-600 hover:bg-rose-50">🗑 삭제</Button>
+              <Button variant="secondary" onClick={onClose}>닫기</Button>
+            </>
+          }
+        >
+          <p className="text-xs text-slate-400">
+            {recipe.source === 'ai' && <span className="mr-1.5 rounded-full bg-ink/85 px-2 py-0.5 text-[10px] font-bold text-white">🤖 AI 생성</span>}
+            {formatDate(recipe.createdAt)}에 {recipe.source === 'ai' ? '생성' : '작성'}
+          </p>
+
+          <h3 className="mt-5 text-sm font-bold text-slate-700">재료 <span className="font-medium text-slate-400">· 냉장고에 {recipe.haveCount}/{recipe.ingredients.length}개</span></h3>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {recipe.ingredients.map((ing, i) => (
+              <li key={ing} className={`rounded-full px-3 py-1.5 text-sm font-medium ${recipe.matched[i] ? 'bg-mint-100 text-mint-700' : 'bg-white text-slate-500 ring-1 ring-slate-200'}`}>
+                {recipe.matched[i] ? '✓' : '🛒'} {ing}
+              </li>
+            ))}
+          </ul>
+          {missing.length > 0 ? (
+            <p className="mt-3 rounded-2xl bg-coral-50 px-4 py-3 text-sm text-coral-600">
+              장볼 재료: <b>{missing.join(', ')}</b>
+            </p>
+          ) : (
+            <p className="mt-3 rounded-2xl bg-mint-50 px-4 py-3 text-sm text-mint-700">🎉 지금 냉장고 재료로 바로 만들 수 있어요!</p>
+          )}
+
+          <h3 className="mt-6 text-sm font-bold text-slate-700">조리법</h3>
+          <ol className="mt-3 space-y-3">
+            {steps.map((step, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ink text-xs font-bold text-white">{i + 1}</span>
+                <p className="whitespace-pre-wrap pt-0.5 text-[15px] leading-relaxed text-slate-700">{step}</p>
+              </li>
+            ))}
+          </ol>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📝 Form Modals
+    // ========================================
+
+    const EMPTY_INGREDIENT = { name: '', zone: 'fridge', category: '채소·과일', quantity: '', expiresOn: '' };
+
+    function IngredientFormModal({ isOpen, onClose, onSubmit }) {
+      const [form, setForm] = useState(EMPTY_INGREDIENT);
+      const [errors, setErrors] = useState({});
+      const [saving, setSaving] = useState(false);
+      const [serverError, setServerError] = useState('');
+
+      useEffect(() => {
+        if (isOpen) {
+          setForm(EMPTY_INGREDIENT);
+          setErrors({});
+          setServerError('');
+        }
+      }, [isOpen]);
+
+      const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
+
+      async function handleSubmit(e) {
+        e.preventDefault();
+        const name = form.name.trim();
+        const next = {};
+        if (!name) next.name = '재료 이름을 입력해 주세요.';
+        else if (name.length > 30) next.name = '30자 이내로 입력해 주세요.';
+        if (form.quantity.trim().length > 20) next.quantity = '20자 이내로 입력해 주세요.';
+        setErrors(next);
+        if (Object.keys(next).length) return;
+
+        setSaving(true);
+        setServerError('');
+        try {
+          await onSubmit({ ...form, name, quantity: form.quantity.trim(), expiresOn: form.expiresOn || null });
+          // 연속 입력하기 쉽게 이름/수량/기한만 비우고 위치·분류는 유지
+          setForm((f) => ({ ...f, name: '', quantity: '', expiresOn: '' }));
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setSaving(false);
+        }
+      }
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="냉장고에 재료 넣기">
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            <div className="flex items-center gap-4 rounded-3xl bg-white p-4 ring-1 ring-slate-900/5">
+              <span className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-mint-50" aria-hidden="true">
+                <IngredientIcon name={form.name} category={form.category} size="lg" />
+              </span>
+              <Input
+                label="재료 이름"
+                value={form.name}
+                onChange={(e) => set('name')(e.target.value)}
+                placeholder="예) 계란, 대파, 삼겹살"
+                maxLength={30}
+                error={errors.name}
+                autoFocus
+                className="flex-1"
+              />
+            </div>
+
+            <ChipGroup
+              label="보관 위치"
+              value={form.zone}
+              onChange={set('zone')}
+              options={[{ value: 'fridge', label: '🧊 냉장실' }, { value: 'freezer', label: '❄️ 냉동실' }]}
+            />
+
+            <ChipGroup
+              label="분류"
+              value={form.category}
+              onChange={set('category')}
+              options={CATEGORIES.map((c) => ({ value: c, label: `${CATEGORY_EMOJI[c]} ${c}` }))}
+            />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                label="수량 (선택)"
+                value={form.quantity}
+                onChange={(e) => set('quantity')(e.target.value)}
+                placeholder="예) 10개, 300g, 반 통"
+                maxLength={20}
+                error={errors.quantity}
+              />
+              <Input
+                label="유통기한 (선택)"
+                type="date"
+                value={form.expiresOn}
+                onChange={(e) => set('expiresOn')(e.target.value)}
+              />
+            </div>
+
+            {serverError && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600" role="alert">{serverError}</p>}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="secondary" onClick={onClose}>닫기</Button>
+              <Button type="submit" variant="mint" disabled={saving}>
+                {saving ? <><Spinner /> 넣는 중…</> : `${ZONE_LABEL[form.zone]}에 넣기`}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      );
+    }
+
+    const EMPTY_RECIPE = { title: '', ingredients: [], steps: '' };
+
+    function RecipeFormModal({ isOpen, onClose, onSubmit, fridgeIngredients }) {
+      const [form, setForm] = useState(EMPTY_RECIPE);
+      const [draft, setDraft] = useState('');
+      const [errors, setErrors] = useState({});
+      const [saving, setSaving] = useState(false);
+      const [serverError, setServerError] = useState('');
+      const draftId = useId();
+
+      useEffect(() => {
+        if (isOpen) {
+          setForm(EMPTY_RECIPE);
+          setDraft('');
+          setErrors({});
+          setServerError('');
+        }
+      }, [isOpen]);
+
+      const addIngredients = (text) => {
+        const parts = text.split(/[,\n]/).map((s) => s.trim().slice(0, 30)).filter(Boolean);
+        if (!parts.length) return;
+        setForm((f) => ({ ...f, ingredients: [...new Set([...f.ingredients, ...parts])].slice(0, 30) }));
+        setErrors((e) => ({ ...e, ingredients: undefined }));
+      };
+
+      const removeIngredient = (name) =>
+        setForm((f) => ({ ...f, ingredients: f.ingredients.filter((i) => i !== name) }));
+
+      function handleDraftKeyDown(e) {
+        // 한글 조합 중 Enter 는 무시 (마지막 글자 중복 방지)
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addIngredients(draft);
+          setDraft('');
+        } else if (e.key === 'Backspace' && !draft && form.ingredients.length) {
+          removeIngredient(form.ingredients[form.ingredients.length - 1]);
+        }
+      }
+
+      function handleDraftChange(e) {
+        const value = e.target.value;
+        if (value.includes(',')) {
+          addIngredients(value);
+          setDraft('');
+        } else {
+          setDraft(value);
+        }
+      }
+
+      const suggestions = useMemo(() => {
+        const names = [...new Set(fridgeIngredients.map((i) => i.name))];
+        return names.filter((n) => !form.ingredients.includes(n)).slice(0, 12);
+      }, [fridgeIngredients, form.ingredients]);
+
+      async function handleSubmit(e) {
+        e.preventDefault();
+        const pending = draft.split(',').map((s) => s.trim()).filter(Boolean);
+        const ingredients = [...new Set([...form.ingredients, ...pending])];
+        const title = form.title.trim();
+        const steps = form.steps.trim();
+
+        const next = {};
+        if (!title) next.title = '요리명을 입력해 주세요.';
+        if (!ingredients.length) next.ingredients = '재료를 한 개 이상 추가해 주세요.';
+        if (!steps) next.steps = '조리법을 입력해 주세요.';
+        setErrors(next);
+        if (Object.keys(next).length) return;
+
+        setSaving(true);
+        setServerError('');
+        try {
+          await onSubmit({ title, ingredients, steps });
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setSaving(false);
+        }
+      }
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="레시피 메모 쓰기" size="lg">
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            <Input
+              label="요리명"
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="예) 대파 계란볶음밥"
+              maxLength={50}
+              error={errors.title}
+              autoFocus
+            />
+
+            <Field label="재료" htmlFor={draftId} error={errors.ingredients} hint="입력 후 Enter 또는 쉼표(,)로 추가해요">
+              <div className={`flex min-h-[48px] flex-wrap items-center gap-1.5 rounded-2xl border bg-white px-2.5 py-2 focus-within:ring-4 ${errors.ingredients ? 'border-rose-300 focus-within:ring-rose-100' : 'border-slate-200 focus-within:border-mint-400 focus-within:ring-mint-100'}`}>
+                {form.ingredients.map((ing) => (
+                  <span key={ing} className="inline-flex items-center gap-1 rounded-full bg-mint-100 py-1 pl-3 pr-1 text-sm font-medium text-mint-700">
+                    {ing}
+                    <button type="button" onClick={() => removeIngredient(ing)} aria-label={`${ing} 빼기`} className="grid h-5 w-5 place-items-center rounded-full hover:bg-mint-200">×</button>
+                  </span>
+                ))}
+                <input
+                  id={draftId}
+                  value={draft}
+                  onChange={handleDraftChange}
+                  onKeyDown={handleDraftKeyDown}
+                  onBlur={() => { addIngredients(draft); setDraft(''); }}
+                  placeholder={form.ingredients.length ? '' : '예) 밥 1공기, 계란 2개, 대파'}
+                  maxLength={30}
+                  className="h-8 min-w-[120px] flex-1 bg-transparent px-1.5 text-sm placeholder:text-slate-400 focus:outline-none"
+                />
+              </div>
+            </Field>
+
+            {suggestions.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold text-slate-500">🧊 냉장고에서 골라 담기</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {suggestions.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => addIngredients(name)}
+                      className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 transition hover:bg-mint-50 hover:text-mint-700 hover:ring-mint-300"
+                    >
+                      + {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <Textarea
+              label="조리법"
+              value={form.steps}
+              onChange={(e) => setForm((f) => ({ ...f, steps: e.target.value }))}
+              placeholder={'한 줄에 한 단계씩 적어주세요\n팬에 기름을 두르고 대파를 볶는다\n계란을 넣고 스크램블한다\n밥을 넣고 간장으로 간한다'}
+              rows={7}
+              maxLength={3000}
+              error={errors.steps}
+              hint={`${parseSteps(form.steps).length}단계 · ${form.steps.length}/3000자`}
+            />
+
+            {serverError && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600" role="alert">{serverError}</p>}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="secondary" onClick={onClose}>취소</Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <><Spinner /> 붙이는 중…</> : '📌 냉장고에 붙이기'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      );
+    }
+
+    // 냉장고 재료를 골라 AI에게 레시피를 맡기는 모달
+    function AiRecipeModal({ isOpen, onClose, onSubmit, fridgeIngredients }) {
+      const [selected, setSelected] = useState([]);
+      const [request, setRequest] = useState('');
+      const [generating, setGenerating] = useState(false);
+      const [serverError, setServerError] = useState('');
+
+      // 열 때마다 냉장고 전체를 기본 선택으로 되돌린다
+      useEffect(() => {
+        if (!isOpen) return;
+        setSelected(fridgeIngredients.map((i) => i.id));
+        setRequest('');
+        setServerError('');
+        setGenerating(false);
+      }, [isOpen, fridgeIngredients]);
+
+      const toggle = (id) =>
+        setSelected((list) => (list.includes(id) ? list.filter((v) => v !== id) : [...list, id]));
+
+      const allSelected = selected.length === fridgeIngredients.length && fridgeIngredients.length > 0;
+      const expiring = fridgeIngredients.filter((i) => {
+        const d = getDday(i.expiresOn);
+        return d && d.diff <= 3;
+      });
+
+      async function handleSubmit(e) {
+        e.preventDefault();
+        if (!selected.length) {
+          setServerError('재료를 한 개 이상 골라 주세요.');
+          return;
+        }
+        setGenerating(true);
+        setServerError('');
+        try {
+          await onSubmit({ ingredientIds: selected, request: request.trim() });
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setGenerating(false);
+        }
+      }
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="🤖 AI에게 레시피 맡기기" size="lg">
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            <p className="rounded-2xl bg-mint-50 px-4 py-3 text-sm text-mint-700">
+              고른 재료로 AI가 요리 하나를 제안하고, 그대로 레시피 메모에 붙여 둡니다.
+              {expiring.length > 0 && <> 유통기한이 임박한 <b>{expiring.map((i) => i.name).join(', ')}</b>을(를) 먼저 씁니다.</>}
+            </p>
+
+            <Field
+              label={`쓸 재료 (${selected.length}/${fridgeIngredients.length})`}
+              hint="빼고 싶은 재료는 눌러서 끌 수 있어요"
+            >
+              {fridgeIngredients.length === 0 ? (
+                <p className="rounded-2xl bg-white px-4 py-6 text-center text-sm text-slate-500 ring-1 ring-slate-200">
+                  냉장고가 비어 있어요. 재료를 먼저 넣어 주세요.
+                </p>
+              ) : (
+                <>
+                  <div className="mb-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setSelected(allSelected ? [] : fridgeIngredients.map((i) => i.id))}
+                      className="text-xs font-semibold text-slate-500 underline-offset-2 hover:text-ink hover:underline"
+                    >
+                      {allSelected ? '전체 해제' : '전체 선택'}
+                    </button>
+                  </div>
+                  <div className="flex max-h-56 flex-wrap gap-1.5 overflow-y-auto rounded-2xl bg-white p-3 ring-1 ring-slate-200">
+                    {fridgeIngredients.map((item) => {
+                      const on = selected.includes(item.id);
+                      const dday = getDday(item.expiresOn);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => toggle(item.id)}
+                          className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium transition ${on ? 'bg-mint-100 text-mint-700 ring-1 ring-mint-300' : 'bg-slate-50 text-slate-400 ring-1 ring-slate-200'}`}
+                        >
+                          <IngredientIcon name={item.name} category={item.category} size="sm" />
+                          {item.name}
+                          {dday && dday.diff <= 3 && <span className="text-[10px] font-bold text-coral-600">{dday.label}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </Field>
+
+            <Input
+              label="추가 요청 (선택)"
+              value={request}
+              onChange={(e) => setRequest(e.target.value)}
+              placeholder="예) 15분 안에, 맵지 않게, 아이도 먹을 수 있게"
+              maxLength={200}
+            />
+
+            {serverError && <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600" role="alert">{serverError}</p>}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="secondary" onClick={onClose} disabled={generating}>취소</Button>
+              <Button type="submit" variant="mint" disabled={generating || !fridgeIngredients.length}>
+                {generating ? <><Spinner /> 요리 궁리 중…</> : '레시피 만들기'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      );
+    }
+
+    function ConfirmModal({ target, onCancel, onConfirm, busy }) {
+      if (!target) return null;
+      const isRecipe = target.kind === 'recipe';
+      const name = isRecipe ? target.item.title : target.item.name;
+      return (
+        <Modal
+          isOpen
+          onClose={onCancel}
+          title={isRecipe ? '레시피를 뗄까요?' : '재료를 꺼낼까요?'}
+          size="sm"
+          footer={
+            <>
+              <Button variant="secondary" onClick={onCancel}>취소</Button>
+              <Button variant="danger" onClick={onConfirm} disabled={busy} autoFocus>
+                {busy ? <><Spinner /> 삭제 중…</> : '삭제'}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm leading-relaxed text-slate-600">
+            <b className="text-ink">{name}</b>{isRecipe ? ' 레시피가 영구히 삭제됩니다.' : '을(를) 냉장고 목록에서 삭제합니다.'}
+          </p>
+        </Modal>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Component
+    // ========================================
+
+    function FridgePage() {
+      const ingredientsState = useCollection('/ingredients');
+      const recipesState = useCollection('/recipes');
+      const ingredients = ingredientsState.data;
+      const recipes = recipesState.data;
+
+      const [doors, setDoors] = useState({ freezer: false, fridge: false });
+      const [showIngredientForm, setShowIngredientForm] = useState(false);
+      const [showRecipeForm, setShowRecipeForm] = useState(false);
+      const [showAiForm, setShowAiForm] = useState(false);
+      const [generating, setGenerating] = useState(false);
+      const [aiReady, setAiReady] = useState(false);
+      const [openRecipeId, setOpenRecipeId] = useState(null);
+      const [confirmTarget, setConfirmTarget] = useState(null);
+      const [deleting, setDeleting] = useState(false);
+      const [newIngredientId, setNewIngredientId] = useState(null);
+      const [toast, setToast] = useState(null);
+      const autoOpened = useRef(false);
+
+      const notify = useCallback((message, type = 'success') => {
+        setToast({ id: Date.now(), message, type });
+      }, []);
+
+      useEffect(() => {
+        if (!toast) return;
+        const t = setTimeout(() => setToast(null), 2600);
+        return () => clearTimeout(t);
+      }, [toast]);
+
+      // 서버에 AI 키가 있는지 한 번만 확인한다 (키 값 자체는 내려오지 않는다)
+      useEffect(() => {
+        let alive = true;
+        api('/config')
+          .then((cfg) => { if (alive) setAiReady(!!cfg.aiReady); })
+          .catch(() => {});
+        return () => { alive = false; };
+      }, []);
+
+      // 첫 로딩이 끝나면 문을 스르륵 연다
+      useEffect(() => {
+        if (ingredientsState.loading || autoOpened.current) return;
+        autoOpened.current = true;
+        const t1 = setTimeout(() => setDoors((d) => ({ ...d, fridge: true })), 350);
+        const t2 = setTimeout(() => setDoors((d) => ({ ...d, freezer: true })), 650);
+        return () => { clearTimeout(t1); clearTimeout(t2); };
+      }, [ingredientsState.loading]);
+
+      // 레시피마다 냉장고 보유 여부를 계산
+      const fridgeNames = useMemo(() => ingredients.map((i) => normalize(i.name)).filter(Boolean), [ingredients]);
+      const enrichedRecipes = useMemo(
+        () => recipes.map((r) => {
+          const matched = r.ingredients.map((ing) => hasIngredient(ing, fridgeNames));
+          return { ...r, matched, haveCount: matched.filter(Boolean).length };
+        }),
+        [recipes, fridgeNames]
+      );
+      const openRecipe = enrichedRecipes.find((r) => r.id === openRecipeId) || null;
+
+      const expiringCount = ingredients.filter((i) => {
+        const d = getDday(i.expiresOn);
+        return d && d.diff <= 3;
+      }).length;
+      const allOpen = doors.freezer && doors.fridge;
+
+      async function handleAddIngredient(values) {
+        const created = await api('/ingredients', { method: 'POST', body: JSON.stringify(values) });
+        ingredientsState.setData((list) => sortIngredients([created, ...list]));
+        setNewIngredientId(created.id);
+        setDoors((d) => ({ ...d, [created.zone]: true }));
+        notify(`${created.name}을(를) ${ZONE_LABEL[created.zone]}에 넣었어요`);
+      }
+
+      async function handleAddRecipe(values) {
+        const created = await api('/recipes', { method: 'POST', body: JSON.stringify(values) });
+        recipesState.setData((list) => [created, ...list]);
+        setShowRecipeForm(false);
+        notify(`‘${created.title}’ 레시피를 붙였어요 📌`);
+      }
+
+      async function handleGenerateRecipe(values) {
+        setGenerating(true);
+        try {
+          const created = await api('/recipes/generate', { method: 'POST', body: JSON.stringify(values) });
+          recipesState.setData((list) => [created, ...list]);
+          setShowAiForm(false);
+          setOpenRecipeId(created.id); // 만들자마자 바로 펼쳐 보여준다
+          notify(`🤖 ‘${created.title}’ 레시피를 만들어 붙였어요`);
+        } finally {
+          setGenerating(false);
+        }
+      }
+
+      async function handleConfirmDelete() {
+        const { kind, item } = confirmTarget;
+        setDeleting(true);
+        try {
+          if (kind === 'recipe') {
+            await api(`/recipes/${item.id}`, { method: 'DELETE' });
+            recipesState.setData((list) => list.filter((r) => r.id !== item.id));
+            notify(`‘${item.title}’ 레시피를 뗐어요`);
+          } else {
+            await api(`/ingredients/${item.id}`, { method: 'DELETE' });
+            ingredientsState.setData((list) => list.filter((i) => i.id !== item.id));
+            notify(`${item.name}을(를) 꺼냈어요`);
+          }
+          setConfirmTarget(null);
+        } catch (err) {
+          notify(err.message, 'error');
+        } finally {
+          setDeleting(false);
+        }
+      }
+
+      return (
+        <div className="min-h-screen overflow-x-clip px-4 pb-16 sm:px-6">
+          <Header
+            fridgeCount={ingredients.filter((i) => i.zone === 'fridge').length}
+            freezerCount={ingredients.filter((i) => i.zone === 'freezer').length}
+            recipeCount={recipes.length}
+          />
+
+          <main className="mx-auto mt-8 grid max-w-6xl items-start gap-12 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
+            <section aria-label="냉장고" className="min-w-0 lg:sticky lg:top-6">
+              <div className="mx-auto mb-5 flex max-w-[520px] flex-wrap items-center justify-between gap-2">
+                <div className="flex gap-2">
+                  <Button variant="mint" onClick={() => setShowIngredientForm(true)}>+ 재료 넣기</Button>
+                  <Button variant="secondary" onClick={() => setDoors({ freezer: !allOpen, fridge: !allOpen })}>
+                    {allOpen ? '🚪 문 닫기' : '🚪 문 열기'}
+                  </Button>
+                </div>
+                {expiringCount > 0 && <Badge tone="amber">⏰ 임박·지난 재료 {expiringCount}개</Badge>}
+              </div>
+
+              <Fridge
+                ingredients={ingredients}
+                loading={ingredientsState.loading}
+                error={ingredientsState.error}
+                onRetry={ingredientsState.reload}
+                doors={doors}
+                onToggleDoor={(zone) => setDoors((d) => ({ ...d, [zone]: !d[zone] }))}
+                onDelete={(item) => setConfirmTarget({ kind: 'ingredient', item })}
+                onAdd={() => setShowIngredientForm(true)}
+                newId={newIngredientId}
+                expiringCount={expiringCount}
+              />
+            </section>
+
+            <RecipeBoard
+              recipes={enrichedRecipes}
+              loading={recipesState.loading}
+              error={recipesState.error}
+              onRetry={recipesState.reload}
+              onCreate={() => setShowRecipeForm(true)}
+              onOpen={(r) => setOpenRecipeId(r.id)}
+              onAiCreate={async () => {
+                if (aiReady) return setShowAiForm(true);
+                // 방금 .env 에 키를 넣었을 수 있으니 서버에 한 번 더 물어본다
+                try {
+                  const cfg = await api('/config');
+                  if (cfg.aiReady) {
+                    setAiReady(true);
+                    return setShowAiForm(true);
+                  }
+                } catch (_err) {
+                  // 조회 실패 시엔 아래 안내로 떨어진다
+                }
+                notify('서버 .env 에 ANTHROPIC_API_KEY 를 추가해 주세요.', 'error');
+              }}
+              aiReady={aiReady}
+              generating={generating}
+            />
+          </main>
+
+          <IngredientFormModal
+            isOpen={showIngredientForm}
+            onClose={() => setShowIngredientForm(false)}
+            onSubmit={handleAddIngredient}
+          />
+          <RecipeFormModal
+            isOpen={showRecipeForm}
+            onClose={() => setShowRecipeForm(false)}
+            onSubmit={handleAddRecipe}
+            fridgeIngredients={ingredients}
+          />
+          <AiRecipeModal
+            isOpen={showAiForm}
+            onClose={() => setShowAiForm(false)}
+            onSubmit={handleGenerateRecipe}
+            fridgeIngredients={ingredients}
+          />
+          <RecipeDetailModal
+            recipe={openRecipe}
+            onClose={() => setOpenRecipeId(null)}
+            onDelete={(recipe) => {
+              setOpenRecipeId(null);
+              setConfirmTarget({ kind: 'recipe', item: recipe });
+            }}
+          />
+          <ConfirmModal
+            target={confirmTarget}
+            busy={deleting}
+            onCancel={() => setConfirmTarget(null)}
+            onConfirm={handleConfirmDelete}
+          />
+          <Toast toast={toast} />
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+
+    function App() {
+      return <FridgePage />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

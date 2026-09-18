@@ -1,0 +1,14 @@
+{
+  "id": "soy-sauce",
+  "name": "진간장",
+  "category": "양념",
+  "quantity": 900,
+  "unit": "ml",
+  "storage": "실온",
+  "purchasedOn": "2026-03-10",
+  "expiresOn": "2028-03-10",
+  "tags": [
+    "양념"
+  ],
+  "note": ""
+}

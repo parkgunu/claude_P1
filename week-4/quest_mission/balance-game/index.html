@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>밸런스 게임</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+  <style>
+    body { font-family: 'Pretendard Variable', Pretendard, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    @keyframes live-ping { 0% { transform: scale(1); opacity: .7; } 80%, 100% { transform: scale(2.4); opacity: 0; } }
+    .live-ping { animation: live-ping 1.6s cubic-bezier(0, 0, .2, 1) infinite; }
+    @keyframes pop-in { 0% { transform: translateY(8px) scale(.98); opacity: 0; } 100% { transform: none; opacity: 1; } }
+    .pop-in { animation: pop-in .35s ease-out both; }
+    @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
+    .bump { animation: bump .35s ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      .live-ping, .pop-in, .bump { animation: none; }
+      .transition-all { transition: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-900 antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ========================================
+    // ⚙️ Config & Utilities
+    // ========================================
+    const API_BASE_URL = '/api';
+    const POLL_INTERVAL_MS = 2000;
+
+    async function api(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.message || '요청을 처리하지 못했습니다.');
+      }
+      return body.data;
+    }
+
+    // 로그인 없이 "한 사람당 한 표"를 구분하기 위한 브라우저별 익명 ID
+    function getVoterId() {
+      const KEY = 'balance-game:voter-id';
+      const make = () => (crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
+      try {
+        let id = localStorage.getItem(KEY);
+        if (!id) {
+          id = make();
+          localStorage.setItem(KEY, id);
+        }
+        return id;
+      } catch {
+        return make();
+      }
+    }
+
+    // 반올림 후에도 두 값의 합이 항상 100 이 되게 한다
+    function percentages(countA, countB) {
+      const total = countA + countB;
+      if (total === 0) return [50, 50];
+      const a = Math.round((countA / total) * 100);
+      return [a, 100 - a];
+    }
+
+    const formatNumber = (n) => n.toLocaleString('ko-KR');
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, className = '', children, ...props }) {
+      const variants = {
+        primary: 'bg-stone-900 text-white hover:bg-stone-700 focus-visible:ring-stone-900',
+        secondary: 'bg-white text-stone-800 border border-stone-300 hover:bg-stone-50 focus-visible:ring-stone-400',
+        danger: 'bg-red-600 text-white hover:bg-red-500 focus-visible:ring-red-600',
+        ghost: 'bg-transparent text-stone-600 hover:bg-stone-200/70 focus-visible:ring-stone-400',
+      };
+      const sizes = {
+        sm: 'px-3 py-1.5 text-sm',
+        md: 'px-4 py-2.5 text-sm',
+        lg: 'px-6 py-3 text-base',
+      };
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          className={`inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ id, label, value, onChange, placeholder, error, disabled, maxLength, hint, className = '', inputRef, ...props }) {
+      return (
+        <div className={className}>
+          {label && (
+            <div className="flex items-baseline justify-between mb-1.5">
+              <label htmlFor={id} className="text-sm font-semibold text-stone-700">{label}</label>
+              {maxLength && (
+                <span className="text-xs tabular-nums text-stone-400">{value.length}/{maxLength}</span>
+              )}
+            </div>
+          )}
+          <input
+            id={id}
+            ref={inputRef}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            maxLength={maxLength}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className={`w-full rounded-xl border bg-white px-3.5 py-2.5 text-[15px] placeholder:text-stone-400 focus:outline-none focus:ring-2 disabled:bg-stone-100 ${error ? 'border-red-400 focus:ring-red-300' : 'border-stone-300 focus:border-stone-500 focus:ring-stone-200'}`}
+            {...props}
+          />
+          {error && <p id={`${id}-error`} className="mt-1 text-xs text-red-600">{error}</p>}
+          {!error && hint && <p className="mt-1 text-xs text-stone-500">{hint}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children, ...props }) {
+      return (
+        <div className={`rounded-3xl bg-white shadow-sm ring-1 ring-stone-200/80 ${className}`} {...props}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'neutral', className = '', children }) {
+      const tones = {
+        neutral: 'bg-stone-100 text-stone-600',
+        live: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+        warn: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return (
+        <svg className={`animate-spin h-5 w-5 ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" />
+          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      );
+    }
+
+    function Tabs({ tabs, value, onChange, label }) {
+      return (
+        <div role="tablist" aria-label={label} className="inline-flex rounded-xl bg-stone-200/70 p-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.value}
+              role="tab"
+              type="button"
+              aria-selected={value === tab.value}
+              onClick={() => onChange(tab.value)}
+              className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 ${value === tab.value ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        document.addEventListener('keydown', onKey);
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+          document.removeEventListener('keydown', onKey);
+          document.body.style.overflow = prevOverflow;
+        };
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0 bg-stone-900/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
+            className={`pop-in relative w-full ${sizes[size]} rounded-t-3xl sm:rounded-3xl bg-white shadow-xl max-h-[92vh] overflow-y-auto`}
+          >
+            <div className="flex items-center justify-between px-5 sm:px-6 pt-5">
+              <h2 id="modal-title" className="text-lg font-bold">{title}</h2>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="닫기"
+                className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-5 sm:px-6 pb-6 pt-4">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Toast({ message, onClose }) {
+      useEffect(() => {
+        if (!message) return;
+        const t = setTimeout(onClose, 3000);
+        return () => clearTimeout(t);
+      }, [message, onClose]);
+
+      if (!message) return null;
+      return (
+        <div role="status" className="pop-in fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-stone-900 px-4 py-3 text-sm font-medium text-white shadow-lg">
+          {message}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🪝 Data Hooks
+    // ========================================
+
+    // 질문 목록을 주기적으로 다시 받아와 다른 사람의 투표도 실시간으로 반영한다.
+    // 투표 요청이 오가는 동안 시작된 폴링 응답은 버려서, 방금 누른 결과가 옛 값으로 되돌아가지 않게 한다.
+    function useQuestions(sort, voterId) {
+      const [questions, setQuestions] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [lastSyncedAt, setLastSyncedAt] = useState(null);
+      const mutationSeq = useRef(0);
+
+      const refresh = useCallback(async () => {
+        const seqAtStart = mutationSeq.current;
+        try {
+          const data = await api(`/questions?sort=${sort}&voterId=${encodeURIComponent(voterId)}`);
+          if (seqAtStart !== mutationSeq.current) return;
+          setQuestions(data);
+          setError(null);
+          setLastSyncedAt(new Date());
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      }, [sort, voterId]);
+
+      useEffect(() => {
+        setLoading(true);
+        refresh();
+        const timer = setInterval(() => {
+          if (document.visibilityState === 'visible') refresh();
+        }, POLL_INTERVAL_MS);
+        const onVisible = () => document.visibilityState === 'visible' && refresh();
+        document.addEventListener('visibilitychange', onVisible);
+        return () => {
+          clearInterval(timer);
+          document.removeEventListener('visibilitychange', onVisible);
+        };
+      }, [refresh]);
+
+      const replaceQuestion = useCallback((updated) => {
+        setQuestions((prev) => prev.map((q) => (q.id === updated.id ? updated : q)));
+      }, []);
+
+      const vote = useCallback(async (question, choice) => {
+        if (question.myChoice === choice) return;
+        mutationSeq.current += 1;
+
+        // 낙관적 업데이트: 서버 응답 전에 먼저 반영
+        const optimistic = { ...question, myChoice: choice };
+        if (question.myChoice) optimistic[question.myChoice === 'A' ? 'countA' : 'countB'] -= 1;
+        optimistic[choice === 'A' ? 'countA' : 'countB'] += 1;
+        optimistic.total = optimistic.countA + optimistic.countB;
+        replaceQuestion(optimistic);
+
+        try {
+          const saved = await api(`/questions/${question.id}/vote`, {
+            method: 'POST',
+            body: JSON.stringify({ voterId, choice }),
+          });
+          mutationSeq.current += 1;
+          replaceQuestion(saved);
+        } catch (err) {
+          mutationSeq.current += 1;
+          replaceQuestion(question);
+          throw err;
+        }
+      }, [voterId, replaceQuestion]);
+
+      const addQuestion = useCallback((created) => {
+        mutationSeq.current += 1;
+        setQuestions((prev) => [created, ...prev.filter((q) => q.id !== created.id)]);
+      }, []);
+
+      return { questions, loading, error, lastSyncedAt, vote, addQuestion, refresh };
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function LiveIndicator({ error }) {
+      if (error) {
+        return <Badge tone="warn">연결 재시도 중</Badge>;
+      }
+      return (
+        <Badge tone="live">
+          <span className="relative flex h-2 w-2" aria-hidden="true">
+            <span className="live-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          실시간
+        </Badge>
+      );
+    }
+
+    function Header({ onCreate, error }) {
+      return (
+        <header className="sticky top-0 z-40 border-b border-stone-200/80 bg-stone-100/85 backdrop-blur">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-9 w-9 shrink-0 overflow-hidden rounded-xl shadow-sm" aria-hidden="true">
+                <span className="w-1/2 bg-rose-500" />
+                <span className="w-1/2 bg-sky-500" />
+              </div>
+              <h1 className="truncate text-lg font-extrabold tracking-tight">밸런스 게임</h1>
+              <LiveIndicator error={error} />
+            </div>
+            <Button onClick={onCreate} size="sm" className="shrink-0">
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+              </svg>
+              질문 등록
+            </Button>
+          </div>
+        </header>
+      );
+    }
+
+    // 한쪽 선택지 버튼. 투표 후에는 버튼 자체가 퍼센트 막대가 된다.
+    function OptionButton({ side, text, count, percent, revealed, selected, isLeading, onClick }) {
+      const theme = side === 'A'
+        ? { fill: 'bg-rose-500/15', ring: 'ring-rose-500', text: 'text-rose-600', label: 'bg-rose-500', hover: 'hover:ring-rose-300 hover:bg-rose-50/40' }
+        : { fill: 'bg-sky-500/15', ring: 'ring-sky-500', text: 'text-sky-600', label: 'bg-sky-500', hover: 'hover:ring-sky-300 hover:bg-sky-50/40' };
+
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          aria-pressed={selected}
+          className={`group relative flex min-h-[132px] sm:min-h-[168px] w-full flex-col overflow-hidden rounded-2xl bg-stone-50 p-4 text-left ring-2 transition-all focus:outline-none focus-visible:ring-4 ${selected ? `${theme.ring} bg-white` : `ring-stone-200 ${theme.hover}`}`}
+        >
+          {/* 퍼센트 채움 막대 (아래에서 위로) */}
+          <span
+            aria-hidden="true"
+            className={`absolute inset-x-0 bottom-0 ${theme.fill} transition-all duration-700 ease-out`}
+            style={{ height: revealed ? `${percent}%` : '0%' }}
+          />
+
+          <span className="relative flex items-center justify-between">
+            <span className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-black text-white ${theme.label}`}>{side}</span>
+            {selected && (
+              <span className={`flex items-center gap-1 text-xs font-bold ${theme.text}`}>
+                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0L3.3 9.7a1 1 0 1 1 1.4-1.4l3.8 3.8 6.8-6.8a1 1 0 0 1 1.4 0Z" clipRule="evenodd" />
+                </svg>
+                내 선택
+              </span>
+            )}
+          </span>
+
+          {/* 가운데 VS 배지와 글자가 겹치지 않도록 배지 쪽에 여백을 둔다 */}
+          <span className={`relative mt-3 flex-1 text-[15px] sm:text-lg font-bold leading-snug break-keep ${side === 'A' ? 'pr-5' : 'pl-5'}`}>{text}</span>
+
+          <span className="relative mt-3 flex items-end justify-between gap-2">
+            {revealed ? (
+              <>
+                <span key={percent} className={`bump text-3xl sm:text-4xl font-black tabular-nums tracking-tight ${isLeading ? theme.text : 'text-stone-400'}`}>
+                  {percent}<span className="text-lg sm:text-xl">%</span>
+                </span>
+                <span className="pb-1 text-xs font-medium tabular-nums text-stone-500 whitespace-nowrap">{formatNumber(count)}명</span>
+              </>
+            ) : (
+              <span className="text-xs font-medium text-stone-400 group-hover:text-stone-600">눌러서 선택</span>
+            )}
+          </span>
+        </button>
+      );
+    }
+
+    function QuestionCard({ question, onVote, highlight }) {
+      const [pA, pB] = percentages(question.countA, question.countB);
+      const revealed = !!question.myChoice;
+
+      return (
+        <Card className={`p-4 sm:p-6 ${highlight ? 'pop-in ring-2 ring-amber-300' : ''}`}>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <h2 className="text-base sm:text-lg font-bold leading-snug text-stone-800 break-keep">
+              {question.title || '당신의 선택은?'}
+            </h2>
+            <span className="shrink-0 pt-0.5 text-xs font-semibold tabular-nums text-stone-500">
+              총 <span key={question.total} className="bump inline-block text-stone-900">{formatNumber(question.total)}</span>명 참여
+            </span>
+          </div>
+
+          <div className="relative grid grid-cols-2 gap-2.5 sm:gap-4">
+            <OptionButton
+              side="A"
+              text={question.optionA}
+              count={question.countA}
+              percent={pA}
+              revealed={revealed}
+              selected={question.myChoice === 'A'}
+              isLeading={pA >= pB}
+              onClick={() => onVote(question, 'A')}
+            />
+            <OptionButton
+              side="B"
+              text={question.optionB}
+              count={question.countB}
+              percent={pB}
+              revealed={revealed}
+              selected={question.myChoice === 'B'}
+              isLeading={pB >= pA}
+              onClick={() => onVote(question, 'B')}
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 flex h-9 w-9 sm:h-11 sm:w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-stone-900 text-[11px] sm:text-xs font-black italic text-white ring-4 ring-white"
+            >
+              VS
+            </span>
+          </div>
+
+          <p className="sr-only" aria-live="polite">
+            {revealed ? `A ${pA}퍼센트 ${question.countA}명, B ${pB}퍼센트 ${question.countB}명, 총 ${question.total}명 참여` : ''}
+          </p>
+
+          <p className="mt-3 text-center text-xs text-stone-400">
+            {revealed ? '다른 쪽을 누르면 선택을 바꿀 수 있어요' : '선택하면 결과가 공개돼요'}
+          </p>
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    const LIMITS = { title: 40, option: 60 };
+
+    function CreateQuestionModal({ isOpen, onClose, onCreated }) {
+      const [form, setForm] = useState({ title: '', optionA: '', optionB: '' });
+      const [errors, setErrors] = useState({});
+      const [submitting, setSubmitting] = useState(false);
+      const [serverError, setServerError] = useState(null);
+      const firstInputRef = useRef(null);
+
+      useEffect(() => {
+        if (isOpen) {
+          setForm({ title: '', optionA: '', optionB: '' });
+          setErrors({});
+          setServerError(null);
+          setTimeout(() => firstInputRef.current?.focus(), 30);
+        }
+      }, [isOpen]);
+
+      const update = (field) => (e) => {
+        setForm((f) => ({ ...f, [field]: e.target.value }));
+        setErrors((er) => ({ ...er, [field]: undefined }));
+      };
+
+      const validate = () => {
+        const next = {};
+        const a = form.optionA.trim();
+        const b = form.optionB.trim();
+        if (!a) next.optionA = 'A 선택지를 입력해 주세요.';
+        if (!b) next.optionB = 'B 선택지를 입력해 주세요.';
+        if (a && b && a === b) next.optionB = 'A와 다른 선택지를 입력해 주세요.';
+        setErrors(next);
+        return Object.keys(next).length === 0;
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!validate() || submitting) return;
+        setSubmitting(true);
+        setServerError(null);
+        try {
+          const created = await api('/questions', { method: 'POST', body: JSON.stringify(form) });
+          onCreated(created);
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="밸런스 게임 질문 등록">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <Input
+              id="q-title"
+              label="제목 (선택)"
+              inputRef={firstInputRef}
+              value={form.title}
+              onChange={update('title')}
+              placeholder="예: 직장인 최대 난제"
+              maxLength={LIMITS.title}
+              hint="비워 두면 '당신의 선택은?'으로 표시돼요"
+              disabled={submitting}
+            />
+            <Input
+              id="q-option-a"
+              label="A 선택지"
+              value={form.optionA}
+              onChange={update('optionA')}
+              placeholder="예: 월급 500 + 주7일 출근"
+              maxLength={LIMITS.option}
+              error={errors.optionA}
+              disabled={submitting}
+            />
+            <Input
+              id="q-option-b"
+              label="B 선택지"
+              value={form.optionB}
+              onChange={update('optionB')}
+              placeholder="예: 월급 300 + 주4일 출근"
+              maxLength={LIMITS.option}
+              error={errors.optionB}
+              disabled={submitting}
+            />
+
+            {/* 미리보기 */}
+            <div className="rounded-2xl bg-stone-50 p-3 ring-1 ring-stone-200">
+              <p className="mb-2 text-xs font-semibold text-stone-500">미리보기</p>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm font-bold">
+                <span className="rounded-xl bg-rose-50 px-3 py-2.5 text-rose-700 break-keep">{form.optionA.trim() || 'A 선택지'}</span>
+                <span className="text-xs font-black italic text-stone-400">VS</span>
+                <span className="rounded-xl bg-sky-50 px-3 py-2.5 text-sky-700 break-keep">{form.optionB.trim() || 'B 선택지'}</span>
+              </div>
+            </div>
+
+            {serverError && (
+              <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{serverError}</p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <Button variant="secondary" onClick={onClose} className="flex-1" disabled={submitting}>취소</Button>
+              <Button type="submit" className="flex-1" disabled={submitting}>
+                {submitting && <Spinner className="h-4 w-4" />}
+                {submitting ? '등록 중…' : '등록하기'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      );
+    }
+
+    function HomePage({ voterId }) {
+      const [sort, setSort] = useState('latest');
+      const [isCreateOpen, setCreateOpen] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [highlightId, setHighlightId] = useState(null);
+      const { questions, loading, error, vote, addQuestion, refresh } = useQuestions(sort, voterId);
+
+      const stats = useMemo(() => ({
+        questions: questions.length,
+        votes: questions.reduce((sum, q) => sum + q.total, 0),
+        mine: questions.filter((q) => q.myChoice).length,
+      }), [questions]);
+
+      const handleVote = useCallback(async (question, choice) => {
+        try {
+          await vote(question, choice);
+        } catch (err) {
+          setToast(err.message);
+        }
+      }, [vote]);
+
+      const handleCreated = (created) => {
+        setCreateOpen(false);
+        if (sort !== 'latest') setSort('latest');
+        addQuestion(created);
+        setHighlightId(created.id);
+        setToast('질문이 등록됐어요!');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        setTimeout(() => setHighlightId(null), 2500);
+      };
+
+      const closeCreate = useCallback(() => setCreateOpen(false), []);
+      const closeToast = useCallback(() => setToast(null), []);
+
+      return (
+        <>
+          <Header onCreate={() => setCreateOpen(true)} error={error && questions.length > 0} />
+
+          <main className="mx-auto max-w-3xl px-4 pb-16 pt-6 sm:px-6">
+            {/* 요약 */}
+            <section className="mb-5 grid grid-cols-3 gap-2 sm:gap-3" aria-label="전체 현황">
+              {[
+                { label: '질문', value: stats.questions },
+                { label: '누적 투표', value: stats.votes },
+                { label: '내가 고른 질문', value: stats.mine },
+              ].map((s) => (
+                <div key={s.label} className="rounded-2xl bg-white px-3 py-3 ring-1 ring-stone-200/80">
+                  <p className="text-[11px] sm:text-xs font-medium text-stone-500">{s.label}</p>
+                  <p className="text-xl sm:text-2xl font-extrabold tabular-nums">{formatNumber(s.value)}</p>
+                </div>
+              ))}
+            </section>
+
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <Tabs
+                label="정렬"
+                value={sort}
+                onChange={setSort}
+                tabs={[{ value: 'latest', label: '최신순' }, { value: 'popular', label: '참여 많은 순' }]}
+              />
+              <p className="hidden sm:block text-xs text-stone-400">2초마다 결과가 갱신돼요</p>
+            </div>
+
+            {loading && questions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-24 text-stone-500" role="status">
+                <Spinner />
+                <p className="text-sm">질문을 불러오는 중…</p>
+              </div>
+            ) : error && questions.length === 0 ? (
+              <Card className="p-8 text-center">
+                <p className="text-3xl" aria-hidden="true">🔌</p>
+                <p className="mt-2 font-bold">질문을 불러오지 못했어요</p>
+                <p className="mt-1 text-sm text-stone-500">{error}</p>
+                <Button variant="secondary" className="mt-4" onClick={refresh}>다시 시도</Button>
+              </Card>
+            ) : questions.length === 0 ? (
+              <Card className="p-10 text-center">
+                <p className="text-4xl" aria-hidden="true">⚖️</p>
+                <p className="mt-3 text-lg font-bold">아직 등록된 질문이 없어요</p>
+                <p className="mt-1 text-sm text-stone-500">첫 번째 밸런스 게임을 만들어 보세요.</p>
+                <Button className="mt-5" onClick={() => setCreateOpen(true)}>질문 등록</Button>
+              </Card>
+            ) : (
+              <ul className="space-y-4">
+                {questions.map((q) => (
+                  <li key={q.id}>
+                    <QuestionCard question={q} onVote={handleVote} highlight={q.id === highlightId} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </main>
+
+          <CreateQuestionModal isOpen={isCreateOpen} onClose={closeCreate} onCreated={handleCreated} />
+          <Toast message={toast} onClose={closeToast} />
+        </>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const voterId = useMemo(getVoterId, []);
+      return <HomePage voterId={voterId} />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

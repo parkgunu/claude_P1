@@ -1,0 +1,14 @@
+{
+  "id": "carrot",
+  "name": "당근",
+  "category": "채소",
+  "quantity": 1,
+  "unit": "개",
+  "storage": "냉장",
+  "purchasedOn": "2026-09-02",
+  "expiresOn": "2026-09-26",
+  "tags": [
+    "부재료"
+  ],
+  "note": "반 개는 잘라둔 상태"
+}

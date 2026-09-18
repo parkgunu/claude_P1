@@ -1,0 +1,14 @@
+{
+  "id": "king-oyster-mushroom",
+  "name": "새송이버섯",
+  "category": "채소",
+  "quantity": 3,
+  "unit": "개",
+  "storage": "냉장",
+  "purchasedOn": "2026-09-10",
+  "expiresOn": "2026-09-22",
+  "tags": [
+    "부재료"
+  ],
+  "note": ""
+}

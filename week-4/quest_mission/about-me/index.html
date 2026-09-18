@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>박건우 | 기획과 개발 사이</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>">
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN 버전 고정. Babel 은 반드시 7.x -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'Apple SD Gothic Neo', 'Malgun Gothic', 'sans-serif'],
+          },
+          colors: {
+            ink: '#0f1f2e',
+            sea: { 50: '#eef6f9', 100: '#d5e9f0', 300: '#7fb6c9', 500: '#2f7d99', 600: '#23657e', 700: '#1b4f63', 900: '#0d2a36' },
+            sand: '#f7f4ee',
+            sun: '#e8913a',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html { scroll-behavior: smooth; }
+    body { word-break: keep-all; }
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity .8s ease, transform .8s ease; }
+    .reveal.is-visible { opacity: 1; transform: none; }
+    @keyframes wave { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    .wave-track { animation: wave 18s linear infinite; }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pop-in { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }
+    .modal-backdrop { animation: fade-in .2s ease-out; }
+    .modal-panel { animation: pop-in .25s ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+      .wave-track, .modal-backdrop, .modal-panel { animation: none; }
+    }
+  </style>
+</head>
+<body class="bg-sand text-ink font-sans antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks
+    // ========================================
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ========================================
+    // 📦 Data
+    // ========================================
+    const API_BASE_URL = '/api';
+
+    // 이미지: Wikimedia Commons (각 파일 페이지에서 라이선스 확인 가능)
+    const IMAGES = {
+      geoje: {
+        src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/Geoje_Coast.JPG/1280px-Geoje_Coast.JPG',
+        alt: '소나무 사이로 보이는 거제 앞바다와 멀리 조선소 크레인',
+        credit: 'Geoje Coast',
+        page: 'https://commons.wikimedia.org/wiki/File:Geoje_Coast.JPG',
+      },
+      seoul: {
+        src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Han_River_Seoul_skyline_Pixabay_1214950.jpg/1280px-Han_River_Seoul_skyline_Pixabay_1214950.jpg',
+        alt: '한강 너머로 보이는 서울 여의도 스카이라인',
+        credit: 'Han River Seoul skyline',
+        page: 'https://commons.wikimedia.org/wiki/File:Han_River_Seoul_skyline_Pixabay_1214950.jpg',
+      },
+      data: {
+        src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Analytics_2016-02-26_at_10.19.24_AM.jpg/1280px-Analytics_2016-02-26_at_10.19.24_AM.jpg',
+        alt: '노트북 화면에 띄워진 데이터 분석 그래프',
+        credit: 'Analytics',
+        page: 'https://commons.wikimedia.org/wiki/File:Analytics_2016-02-26_at_10.19.24_AM.jpg',
+      },
+      wireframe: {
+        src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/28/Designer_sketching_Wireframes_%28Unsplash%29.jpg/1280px-Designer_sketching_Wireframes_%28Unsplash%29.jpg',
+        alt: '종이에 화면 와이어프레임을 스케치하는 손',
+        credit: 'Designer sketching Wireframes',
+        page: 'https://commons.wikimedia.org/wiki/File:Designer_sketching_Wireframes_(Unsplash).jpg',
+      },
+      code: {
+        src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Laptop_coding_programs_%28Unsplash%29.jpg/1280px-Laptop_coding_programs_%28Unsplash%29.jpg',
+        alt: '노트북 화면의 코드 에디터를 바라보는 사람',
+        credit: 'Laptop coding programs',
+        page: 'https://commons.wikimedia.org/wiki/File:Laptop_coding_programs_(Unsplash).jpg',
+      },
+      sunrise: {
+        src: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Sunrise_over_sea_horizon.jpg/1280px-Sunrise_over_sea_horizon.jpg',
+        alt: '수평선 위로 떠오르는 해와 밀려오는 파도',
+        credit: 'Sunrise over sea horizon',
+        page: 'https://commons.wikimedia.org/wiki/File:Sunrise_over_sea_horizon.jpg',
+      },
+    };
+
+    const NAV_ITEMS = [
+      { id: 'sea', label: '거제' },
+      { id: 'study', label: '산업공학' },
+      { id: 'career', label: 'UX/UI 기획' },
+      { id: 'coding', label: '코딩' },
+      { id: 'goals', label: '목표' },
+      { id: 'contact', label: '문의' },
+    ];
+
+    const JOURNEY = [
+      { place: '거제', desc: '1985 · 바다와 조선소' },
+      { place: '서울', desc: '스무 살 · 대학 입학' },
+      { place: '산업공학', desc: '학부 · 대학원' },
+      { place: 'UX/UI 기획', desc: '현재 커리어' },
+      { place: '개발', desc: '지금, 새로운 한 걸음' },
+    ];
+
+    const STRENGTHS = [
+      {
+        icon: '🧩',
+        title: '문제를 구조화하는 힘',
+        body: '산업공학에서 배운 프로세스적 사고로, 복잡하게 얽힌 요구사항을 정리하고 우선순위를 세웁니다.',
+      },
+      {
+        icon: '👆',
+        title: '사용자 관점의 판단',
+        body: '화면 하나를 그릴 때도 "이 버튼을 누르는 사람이 지금 무엇을 기대하고 있을까"를 먼저 생각합니다.',
+      },
+      {
+        icon: '🤝',
+        title: '협업과 조율',
+        body: '기획·디자인·개발·현업 부서 사이에서 서로 다른 언어를 이어 붙이는 역할에 익숙합니다.',
+      },
+    ];
+
+    const TRANSLATIONS = [
+      ['사용자의 불편', '요구사항'],
+      ['요구사항', '화면과 흐름'],
+      ['화면', '모두가 같은 그림으로 이해하는 언어'],
+    ];
+
+    const GOALS = [
+      {
+        term: '단기',
+        title: '아이디어를 직접 프로토타입으로',
+        body: '기획한 아이디어를 스스로 프로토타입으로 만들어 검증할 수 있게 되는 것. 말과 문서 대신 동작하는 화면을 보여줄 수 있다면, 논의의 속도와 질이 완전히 달라질 것이라 믿습니다.',
+      },
+      {
+        term: '중기',
+        title: '개발팀과 더 깊이 소통하는 기획자',
+        body: '구조와 제약을 이해한 상태에서 나온 기획서는 개발자에게도, 사용자에게도 더 나은 결과로 이어질 것입니다.',
+      },
+      {
+        term: '장기',
+        title: '기획과 개발, 양쪽의 언어를 모두',
+        body: '회사에서 기획 업무뿐 아니라 개발 업무까지 함께 수행하며, 기획과 개발 사이의 경계에서 그 간극을 메우는 사람이 되고 싶습니다.',
+      },
+    ];
+
+    // ========================================
+    // 🪝 Hooks
+    // ========================================
+    // 요소 상단이 화면 하단 90% 지점을 지나면 .is-visible 을 붙여 페이드인
+    // (빠르게 점프해 지나친 요소도 보이도록 IntersectionObserver 대신 위치로 판정)
+    function useReveal() {
+      const ref = useRef(null);
+      useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        let frame = 0;
+        const check = () => {
+          frame = 0;
+          if (el.getBoundingClientRect().top < window.innerHeight * 0.9) {
+            el.classList.add('is-visible');
+            cleanup();
+          }
+        };
+        const onScroll = () => { if (!frame) frame = requestAnimationFrame(check); };
+        const cleanup = () => {
+          window.removeEventListener('scroll', onScroll);
+          window.removeEventListener('resize', onScroll);
+          if (frame) cancelAnimationFrame(frame);
+        };
+        window.addEventListener('scroll', onScroll, { passive: true });
+        window.addEventListener('resize', onScroll);
+        check();
+        return cleanup;
+      }, []);
+      return ref;
+    }
+
+    // 현재 보고 있는 섹션 id
+    function useActiveSection(ids) {
+      const [active, setActive] = useState('');
+      useEffect(() => {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) setActive(entry.target.id);
+            });
+          },
+          { rootMargin: '-45% 0px -50% 0px' }
+        );
+        ids.forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) observer.observe(el);
+        });
+        return () => observer.disconnect();
+      }, [ids]);
+      return active;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-sea-700 text-white hover:bg-sea-900 focus-visible:ring-sea-500',
+        secondary: 'bg-white text-sea-700 border border-sea-100 hover:bg-sea-50 focus-visible:ring-sea-300',
+        ghost: 'bg-transparent text-current hover:bg-white/10 focus-visible:ring-white/60',
+        danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-400',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-5 py-2.5 text-sm', lg: 'px-6 py-3 text-base' };
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          className={`inline-flex items-center justify-center gap-2 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <div className={`rounded-2xl bg-white p-6 shadow-sm ring-1 ring-ink/5 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ className = '', children }) {
+      return (
+        <span className={`inline-flex items-center rounded-full bg-sea-50 px-3 py-1 text-xs font-semibold tracking-wide text-sea-700 ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Input({ id, type = 'text', label, value, onChange, placeholder, error, disabled = false, className = '', ...rest }) {
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="mb-1.5 block text-sm font-semibold text-ink">{label}</label>}
+          <input
+            id={id}
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            aria-invalid={error ? 'true' : undefined}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className={`w-full rounded-xl border bg-white px-4 py-3 text-base text-ink placeholder:text-ink/35 transition focus:outline-none focus:ring-2 disabled:bg-ink/5 ${error ? 'border-red-400 focus:ring-red-200' : 'border-ink/15 focus:border-sea-500 focus:ring-sea-100'}`}
+            {...rest}
+          />
+          {error && <p id={`${id}-error`} className="mt-1.5 text-sm text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Textarea({ id, label, value, onChange, placeholder, error, disabled = false, rows = 5, maxLength, className = '', ...rest }) {
+      return (
+        <div className={className}>
+          {label && (
+            <div className="mb-1.5 flex items-baseline justify-between">
+              <label htmlFor={id} className="text-sm font-semibold text-ink">{label}</label>
+              {maxLength && <span className="text-xs tabular-nums text-ink/40">{value.length} / {maxLength.toLocaleString()}</span>}
+            </div>
+          )}
+          <textarea
+            id={id}
+            rows={rows}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            maxLength={maxLength}
+            aria-invalid={error ? 'true' : undefined}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className={`w-full resize-y rounded-xl border bg-white px-4 py-3 text-base leading-relaxed text-ink placeholder:text-ink/35 transition focus:outline-none focus:ring-2 disabled:bg-ink/5 ${error ? 'border-red-400 focus:ring-red-200' : 'border-ink/15 focus:border-sea-500 focus:ring-sea-100'}`}
+            {...rest}
+          />
+          {error && <p id={`${id}-error`} className="mt-1.5 text-sm text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    // 레이어 팝업: Esc·배경 클릭으로 닫힘, 열려 있는 동안 배경 스크롤 잠금, 닫으면 포커스 복귀
+    function Modal({ isOpen, onClose, title, size = 'md', children }) {
+      const panelRef = useRef(null);
+
+      useEffect(() => {
+        if (!isOpen) return;
+        const previouslyFocused = document.activeElement;
+        const onKeyDown = (e) => {
+          if (e.key === 'Escape') onClose();
+          if (e.key === 'Tab' && panelRef.current) {
+            const focusables = panelRef.current.querySelectorAll('button, input, textarea, [href], [tabindex]:not([tabindex="-1"])');
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+          }
+        };
+        const { overflow } = document.body.style;
+        document.body.style.overflow = 'hidden';
+        document.addEventListener('keydown', onKeyDown);
+        panelRef.current?.querySelector('input, textarea, button')?.focus();
+        return () => {
+          document.body.style.overflow = overflow;
+          document.removeEventListener('keydown', onKeyDown);
+          previouslyFocused?.focus?.();
+        };
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
+          <div className="modal-backdrop absolute inset-0 bg-ink/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
+            className={`modal-panel relative max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-sand p-6 shadow-2xl sm:rounded-3xl sm:p-8 ${sizes[size]}`}
+          >
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <h2 id="modal-title" className="text-2xl font-bold text-ink">{title}</h2>
+              <button type="button" onClick={onClose} aria-label="닫기" className="-mr-2 -mt-1 rounded-full p-2 text-ink/50 transition hover:bg-ink/5 hover:text-ink">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            </div>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return <span className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent ${className}`} aria-hidden="true" />;
+    }
+
+    function Reveal({ as: Tag = 'div', className = '', children }) {
+      const ref = useReveal();
+      return <Tag ref={ref} className={`reveal ${className}`}>{children}</Tag>;
+    }
+
+    // 로딩 중엔 스켈레톤, 실패 시 대체 그라데이션
+    function Photo({ image, className = '', imgClassName = '', caption = true }) {
+      const [status, setStatus] = useState('loading');
+      return (
+        <figure className={`relative overflow-hidden rounded-3xl bg-sea-100 ${className}`}>
+          {status === 'loading' && <div className="absolute inset-0 animate-pulse bg-sea-100" aria-hidden="true" />}
+          {status === 'error' ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-sea-300 to-sea-700 p-6 text-center text-sm text-white/90" role="img" aria-label={image.alt}>
+              {image.alt}
+            </div>
+          ) : (
+            <img
+              src={image.src}
+              alt={image.alt}
+              loading="lazy"
+              onLoad={() => setStatus('loaded')}
+              onError={() => setStatus('error')}
+              className={`h-full w-full object-cover transition duration-700 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} ${imgClassName}`}
+            />
+          )}
+          {caption && status !== 'error' && (
+            <figcaption className="absolute bottom-3 right-3 rounded-full bg-black/40 px-2.5 py-1 text-[10px] text-white/80 backdrop-blur">
+              사진: Wikimedia Commons
+            </figcaption>
+          )}
+        </figure>
+      );
+    }
+
+    function SectionHeading({ number, eyebrow, title, light = false }) {
+      return (
+        <div className="mb-10">
+          <p className={`mb-3 flex items-center gap-3 text-sm font-semibold ${light ? 'text-sea-100' : 'text-sea-500'}`}>
+            <span className="tabular-nums">{String(number).padStart(2, '0')}</span>
+            <span className={`h-px w-8 ${light ? 'bg-sea-100/60' : 'bg-sea-300'}`} />
+            {eyebrow}
+          </p>
+          <h2 className={`text-3xl font-bold leading-tight sm:text-4xl ${light ? 'text-white' : 'text-ink'}`}>{title}</h2>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Layout Components
+    // ========================================
+    function scrollToId(id) {
+      document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    }
+
+    function Header() {
+      const active = useActiveSection(NAV_ITEMS.map((n) => n.id));
+      const [scrolled, setScrolled] = useState(false);
+      const [open, setOpen] = useState(false);
+
+      useEffect(() => {
+        const onScroll = () => setScrolled(window.scrollY > 40);
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+        return () => window.removeEventListener('scroll', onScroll);
+      }, []);
+
+      const go = (id) => { setOpen(false); scrollToId(id); };
+
+      return (
+        <header className={`fixed inset-x-0 top-0 z-40 transition ${scrolled || open ? 'bg-sand/90 shadow-sm backdrop-blur' : 'bg-transparent'}`}>
+          <nav className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 sm:px-8" aria-label="주요 섹션">
+            <button type="button" onClick={() => window.scrollTo({ top: 0 })} className="text-base font-bold tracking-tight text-ink">
+              박건우<span className="text-sea-500">.</span>
+            </button>
+            <ul className="hidden gap-1 md:flex">
+              {NAV_ITEMS.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => go(item.id)}
+                    aria-current={active === item.id ? 'true' : undefined}
+                    className={`rounded-full px-4 py-2 text-sm font-medium transition ${active === item.id ? 'bg-sea-700 text-white' : 'text-ink/70 hover:bg-ink/5 hover:text-ink'}`}
+                  >
+                    {item.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="rounded-lg p-2 text-ink md:hidden"
+              aria-expanded={open}
+              aria-controls="mobile-nav"
+              aria-label={open ? '메뉴 닫기' : '메뉴 열기'}
+              onClick={() => setOpen((v) => !v)}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                {open ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+              </svg>
+            </button>
+          </nav>
+          {open && (
+            <ul id="mobile-nav" className="border-t border-ink/5 px-5 pb-4 md:hidden">
+              {NAV_ITEMS.map((item) => (
+                <li key={item.id}>
+                  <button type="button" onClick={() => go(item.id)} className={`block w-full py-3 text-left text-base ${active === item.id ? 'font-bold text-sea-700' : 'text-ink/80'}`}>
+                    {item.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="bg-sea-900 px-5 py-12 text-sea-100 sm:px-8">
+          <div className="mx-auto max-w-6xl">
+            <p className="text-lg font-semibold text-white">감사합니다.</p>
+            <p className="mt-1 text-sm text-sea-100/70">배우는 자세로 성실히 임하겠습니다. — 박건우</p>
+            <div className="mt-8 border-t border-white/10 pt-6 text-xs text-sea-100/60">
+              <p className="mb-2">이미지 출처 (Wikimedia Commons)</p>
+              <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                {Object.values(IMAGES).map((img) => (
+                  <li key={img.page}>
+                    <a href={img.page} target="_blank" rel="noopener noreferrer" className="underline decoration-white/20 underline-offset-2 hover:text-white">
+                      {img.credit}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📄 Section Components
+    // ========================================
+    function Hero() {
+      return (
+        <section className="relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <Badge>AI 코딩 교육 · 자기소개</Badge>
+              <h1 className="mt-6 text-4xl font-extrabold leading-[1.15] tracking-tight sm:text-6xl">
+                기획과 개발 사이,<br />
+                <span className="text-sea-600">양쪽의 언어</span>를 잇는 사람
+              </h1>
+              <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink/70">
+                안녕하세요, UX/UI 기획자 <strong className="font-semibold text-ink">박건우</strong>입니다.
+                거제의 바다에서 시작해, 이제 기획에서 개발로 한 걸음 옮기고 있습니다.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button size="lg" onClick={() => scrollToId('sea')}>이야기 시작하기 ↓</Button>
+                <Button size="lg" variant="secondary" onClick={() => scrollToId('goals')}>목표 먼저 보기</Button>
+              </div>
+            </Reveal>
+
+            {/* 여정 타임라인 */}
+            <Reveal className="mt-16">
+              <ol className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" aria-label="지금까지의 여정">
+                {JOURNEY.map((step, i) => {
+                  const isLast = i === JOURNEY.length - 1;
+                  return (
+                    <li
+                      key={step.place}
+                      className={`relative rounded-2xl p-4 ${isLast ? 'col-span-2 bg-sea-700 text-white sm:col-span-1' : 'bg-white ring-1 ring-ink/5'}`}
+                    >
+                      <span className={`text-xs font-semibold tabular-nums ${isLast ? 'text-sea-100' : 'text-sea-500'}`}>STEP {i + 1}</span>
+                      <p className="mt-1 text-lg font-bold">{step.place}</p>
+                      <p className={`text-sm ${isLast ? 'text-sea-100' : 'text-ink/60'}`}>{step.desc}</p>
+                    </li>
+                  );
+                })}
+              </ol>
+            </Reveal>
+          </div>
+        </section>
+      );
+    }
+
+    function Waves() {
+      // 섹션 전환용 파도 장식
+      const path = 'M0 20 Q 50 0 100 20 T 200 20 T 300 20 T 400 20 V40 H0 Z';
+      return (
+        <div className="h-10 overflow-hidden text-sea-900" aria-hidden="true">
+          <svg className="wave-track h-10 w-[200%]" viewBox="0 0 800 40" preserveAspectRatio="none">
+            <path d={path} fill="currentColor" />
+            <path d={path} fill="currentColor" transform="translate(400 0)" />
+          </svg>
+        </div>
+      );
+    }
+
+    function SeaSection() {
+      return (
+        <section id="sea" className="scroll-mt-20 bg-sea-900 px-5 pb-24 pt-16 text-white sm:px-8">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <SectionHeading number={1} eyebrow="거제에서 서울로" title="바다를 보고 자란 사람" light />
+            </Reveal>
+
+            <div className="grid items-start gap-10 lg:grid-cols-5">
+              <Reveal className="lg:col-span-3">
+                <Photo image={IMAGES.geoje} className="aspect-[4/3]" />
+              </Reveal>
+
+              <Reveal className="space-y-5 text-base leading-relaxed text-sea-100 lg:col-span-2">
+                <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl bg-white/5 p-3">
+                    <dt className="text-sea-100/60">태어난 날</dt>
+                    <dd className="font-semibold text-white">1985. 4. 18. 오전 10시</dd>
+                  </div>
+                  <div className="rounded-xl bg-white/5 p-3">
+                    <dt className="text-sea-100/60">고향</dt>
+                    <dd className="font-semibold text-white">경남 거제 · 1남 1녀 막내</dd>
+                  </div>
+                </dl>
+                <p>
+                  거제는 조선소와 바다가 일상의 배경인 도시입니다. 창밖으로 거대한 배가 만들어지는 과정을 보며 자랐고,
+                  <strong className="font-semibold text-white"> 작은 부품 하나하나가 모여 완성된 구조물이 되는 과정</strong>, 그 안에서 순서와 설계가 얼마나 중요한지를 자연스럽게 익혔습니다.
+                </p>
+                <p>
+                  막내로서 형·누나와 부모님 사이에서 자라며 상대의 입장을 먼저 살피는 습관도 이 시기에 만들어졌습니다.
+                </p>
+              </Reveal>
+            </div>
+
+            <Reveal className="mt-16 grid items-center gap-8 md:grid-cols-2">
+              <div className="order-2 md:order-1">
+                <p className="text-sm font-semibold text-sun">스무 살, 서울</p>
+                <p className="mt-3 text-2xl font-bold leading-snug">"낯선 것을 두려워하지 않는 태도"</p>
+                <p className="mt-4 leading-relaxed text-sea-100">
+                  초등학교부터 고등학교까지 12년을 모두 거제에서 다녔고, 스무 살에 서울 소재 대학교에 입학하며 본격적인 서울 생활을 시작했습니다.
+                  익숙한 곳을 떠나 완전히 새로운 환경에 적응해야 했던 그 시기는 지금도 제 안에 남아 있습니다.
+                </p>
+              </div>
+              <Photo image={IMAGES.seoul} className="order-1 aspect-[2/1] md:order-2" />
+            </Reveal>
+          </div>
+        </section>
+      );
+    }
+
+    function StudySection() {
+      return (
+        <section id="study" className="scroll-mt-20 px-5 py-24 sm:px-8">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <SectionHeading number={2} eyebrow="학부 · 대학원" title="산업공학, 그리고 사람을 향한 관심" />
+            </Reveal>
+
+            <div className="grid items-center gap-10 lg:grid-cols-2">
+              <Reveal className="space-y-5 text-base leading-relaxed text-ink/75">
+                <p>
+                  대학교에서는 <strong className="font-semibold text-ink">산업공학</strong>을 전공했습니다. 사람과 시스템, 그리고 프로세스를 함께 다루는 학문으로,
+                  어떤 문제를 감이 아니라 <strong className="font-semibold text-ink">데이터와 구조</strong>로 바라보는 훈련을 이때 받았습니다.
+                </p>
+                <p>
+                  대학원에서는 <strong className="font-semibold text-ink">산업경영공학</strong>을 전공하며 UX/UI 관련 산학 프로젝트를 수행했습니다.
+                  시스템을 효율적으로 설계하는 것도 중요하지만, 결국 그 시스템을 쓰는 것은 사람이라는 점을 몸으로 배웠습니다.
+                </p>
+              </Reveal>
+              <Reveal>
+                <Photo image={IMAGES.data} className="aspect-[3/2]" />
+              </Reveal>
+            </div>
+
+            <Reveal className="mt-12">
+              <Card className="border-l-4 border-sea-500 bg-sea-50 shadow-none ring-0 sm:p-8">
+                <p className="text-sm font-semibold text-sea-600">산학 프로젝트에서 얻은 깨달음</p>
+                <p className="mt-3 text-lg leading-relaxed text-ink sm:text-xl">
+                  이론적으로 옳은 답과 현실에서 동작하는 답은 다를 수 있다.
+                  그리고 <span className="font-bold text-sea-700">그 간극을 좁히는 일이 기획자의 역할</span>이다.
+                </p>
+              </Card>
+            </Reveal>
+          </div>
+        </section>
+      );
+    }
+
+    function CareerSection() {
+      return (
+        <section id="career" className="scroll-mt-20 bg-white px-5 py-24 sm:px-8">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <SectionHeading number={3} eyebrow="현재" title="UX/UI 기획자로서의 커리어" />
+            </Reveal>
+
+            <div className="grid gap-10 lg:grid-cols-2">
+              <Reveal>
+                <Photo image={IMAGES.wireframe} className="aspect-[3/2]" />
+              </Reveal>
+              <Reveal>
+                <p className="text-base leading-relaxed text-ink/75">
+                  대학원 졸업 후 회사에 입사해 UX/UI 기획자로 근무했고, 지금까지 같은 길에서 커리어를 이어오고 있습니다.
+                  기획자의 일은 결국 <strong className="font-semibold text-ink">"번역"</strong>에 가깝다고 생각합니다.
+                </p>
+                <ol className="mt-6 space-y-3">
+                  {TRANSLATIONS.map(([from, to], i) => (
+                    <li key={i} className="flex items-center gap-3 rounded-xl bg-sand p-4 text-sm sm:text-base">
+                      <span className="shrink-0 font-semibold text-ink">{from}</span>
+                      <span className="shrink-0 text-sea-500" aria-label="을(를) 번역하면">→</span>
+                      <span className="font-semibold text-sea-700">{to}</span>
+                    </li>
+                  ))}
+                </ol>
+              </Reveal>
+            </div>
+
+            <Reveal className="mt-14">
+              <h3 className="mb-5 text-lg font-bold">오랜 시간 이 일을 해오며 갖게 된 강점</h3>
+              <div className="grid gap-4 md:grid-cols-3">
+                {STRENGTHS.map((s) => (
+                  <Card key={s.title} className="bg-sand shadow-none transition hover:-translate-y-1 hover:shadow-md">
+                    <span className="text-3xl" aria-hidden="true">{s.icon}</span>
+                    <h4 className="mt-4 text-lg font-bold">{s.title}</h4>
+                    <p className="mt-2 text-sm leading-relaxed text-ink/70">{s.body}</p>
+                  </Card>
+                ))}
+              </div>
+            </Reveal>
+          </div>
+        </section>
+      );
+    }
+
+    function CodingSection() {
+      return (
+        <section id="coding" className="scroll-mt-20 bg-ink px-5 py-24 text-white sm:px-8">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <SectionHeading number={4} eyebrow="마음 한편의 갈증" title="코딩을 배우는 이유" light />
+            </Reveal>
+
+            <div className="grid items-center gap-10 lg:grid-cols-2">
+              <Reveal className="space-y-5 leading-relaxed text-white/75">
+                <p>
+                  기획서를 아무리 촘촘히 써도, 그것이 실제로 어떻게 구현되는지 모르면 한계가 분명했습니다.
+                  구현 난이도를 가늠하지 못한 채 그린 화면은 개발 단계에서 되돌아오기 일쑤였고,
+                  반대로 기술적으로 충분히 가능한 아이디어를 스스로 접어버린 적도 있었습니다.
+                </p>
+                <blockquote className="border-l-2 border-sun pl-5 text-xl font-semibold leading-snug text-white">
+                  "직접 만들어볼 수 있다면<br className="hidden sm:block" /> 훨씬 더 좋은 기획을 할 수 있을 텐데"
+                </blockquote>
+                <p>그 생각이 오래 쌓였고, 이번 AI 코딩 교육을 수강하게 된 계기가 되었습니다.</p>
+              </Reveal>
+              <Reveal>
+                <Photo image={IMAGES.code} className="aspect-[3/2]" />
+              </Reveal>
+            </div>
+
+            <Reveal className="mt-14 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl bg-white/5 p-6 ring-1 ring-white/10">
+                <p className="font-mono text-xs text-sea-300">// why AI coding</p>
+                <p className="mt-3 leading-relaxed text-white/80">
+                  문법을 처음부터 완벽히 외우지 않아도, 만들고 싶은 것을 명확한 언어로 설명할 수 있다면 결과물에 도달할 수 있습니다.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-sea-700 p-6">
+                <p className="font-mono text-xs text-sea-100">// and that's my job</p>
+                <p className="mt-3 leading-relaxed text-white">
+                  그리고 <strong>"원하는 것을 명확하게 정의하고 설명하는 일"</strong>은 제가 지난 커리어 내내 해온 일이기도 합니다.
+                </p>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+      );
+    }
+
+    function GoalsSection() {
+      return (
+        <section id="goals" className="scroll-mt-20 px-5 py-24 sm:px-8">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <SectionHeading number={5} eyebrow="이번 교육을 통해" title="앞으로의 목표" />
+            </Reveal>
+
+            <ol className="grid gap-4 md:grid-cols-3">
+              {GOALS.map((g, i) => (
+                <Reveal as="li" key={g.term}>
+                  <Card className="h-full">
+                    <div className="flex items-center justify-between">
+                      <Badge className={i === 2 ? 'bg-sun/15 text-[#a85a12]' : ''}>{g.term}적 목표</Badge>
+                      <span className="text-sm font-semibold tabular-nums text-ink/30">0{i + 1}</span>
+                    </div>
+                    <h3 className="mt-4 text-lg font-bold leading-snug">{g.title}</h3>
+                    <p className="mt-3 text-sm leading-relaxed text-ink/70">{g.body}</p>
+                  </Card>
+                </Reveal>
+              ))}
+            </ol>
+
+            <Reveal className="relative mt-16 overflow-hidden rounded-3xl">
+              <Photo image={IMAGES.sunrise} className="aspect-[4/5] rounded-none sm:aspect-[21/9]" caption={false} />
+              <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/75 via-black/30 to-transparent p-6 sm:p-12">
+                <p className="text-sm font-semibold text-sun">거제에서 서울로, 산업공학에서 UX 기획으로, 그리고 이제 기획에서 개발로.</p>
+                <p className="mt-3 max-w-2xl text-2xl font-bold leading-snug text-white sm:text-3xl">
+                  제 삶은 늘 익숙한 자리에서 한 걸음씩 옮겨온 과정이었습니다. 이번 도전 역시 그 연장선에 있습니다.
+                </p>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+      );
+    }
+
+    // ========================================
+    // ✉️ Contact (문의하기)
+    // ========================================
+    const CONTACT_LIMITS = { name: 50, content: 2000 };
+    const EMPTY_FORM = { name: '', email: '', content: '' };
+
+    function validateContact(form) {
+      const errors = {};
+      if (!form.name.trim()) errors.name = '이름을 입력해 주세요.';
+      if (!form.email.trim()) errors.email = '이메일을 입력해 주세요.';
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = '올바른 이메일 형식이 아닙니다.';
+      if (!form.content.trim()) errors.content = '문의 내용을 입력해 주세요.';
+      return errors;
+    }
+
+    function ContactModal({ isOpen, onClose }) {
+      const [form, setForm] = useState(EMPTY_FORM);
+      const [errors, setErrors] = useState({});
+      const [status, setStatus] = useState('idle'); // idle | submitting | done
+      const [serverError, setServerError] = useState('');
+
+      // 닫았다 다시 열면 새 문의로 시작 (작성 중이던 내용은 완료 전까지 유지)
+      useEffect(() => {
+        if (isOpen && status === 'done') {
+          setForm(EMPTY_FORM);
+          setStatus('idle');
+        }
+      }, [isOpen]);
+
+      const update = (field) => (e) => {
+        setForm((f) => ({ ...f, [field]: e.target.value }));
+        if (errors[field]) setErrors((prev) => ({ ...prev, [field]: undefined }));
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        const nextErrors = validateContact(form);
+        setErrors(nextErrors);
+        setServerError('');
+        if (Object.keys(nextErrors).length) return;
+
+        setStatus('submitting');
+        try {
+          const res = await fetch(`${API_BASE_URL}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json.success) throw new Error(json.message || '문의를 보내지 못했습니다.');
+          setStatus('done');
+        } catch (err) {
+          setServerError(err.message === 'Failed to fetch' ? '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.' : err.message);
+          setStatus('idle');
+        }
+      };
+
+      const submitting = status === 'submitting';
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title={status === 'done' ? '문의가 접수되었습니다' : '문의하기'}>
+          {status === 'done' ? (
+            <div className="text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-sea-100 text-3xl" aria-hidden="true">✉️</div>
+              <p className="mt-5 leading-relaxed text-ink/70">
+                <strong className="text-ink">{form.name}</strong>님, 소중한 문의 감사합니다.<br />
+                남겨주신 <strong className="text-ink">{form.email}</strong>로 답변 드리겠습니다.
+              </p>
+              <Button size="lg" className="mt-8 w-full" onClick={onClose}>확인</Button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} noValidate className="space-y-4">
+              <p className="-mt-3 mb-2 text-sm text-ink/60">궁금한 점이나 함께하고 싶은 이야기가 있다면 편하게 남겨 주세요.</p>
+              <Input id="contact-name" label="이름" value={form.name} onChange={update('name')} placeholder="홍길동" maxLength={CONTACT_LIMITS.name} error={errors.name} disabled={submitting} autoComplete="name" />
+              <Input id="contact-email" type="email" label="이메일" value={form.email} onChange={update('email')} placeholder="you@example.com" error={errors.email} disabled={submitting} autoComplete="email" />
+              <Textarea id="contact-content" label="내용" value={form.content} onChange={update('content')} placeholder="문의 내용을 입력해 주세요." maxLength={CONTACT_LIMITS.content} rows={6} error={errors.content} disabled={submitting} />
+              {serverError && (
+                <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{serverError}</p>
+              )}
+              <div className="flex gap-3 pt-2">
+                <Button variant="secondary" size="lg" className="flex-1" onClick={onClose} disabled={submitting}>취소</Button>
+                <Button type="submit" size="lg" className="flex-[2]" disabled={submitting}>
+                  {submitting ? <><Spinner /> 보내는 중…</> : '문의 보내기'}
+                </Button>
+              </div>
+            </form>
+          )}
+        </Modal>
+      );
+    }
+
+    function ContactSection() {
+      const [open, setOpen] = useState(false);
+      const close = useCallback(() => setOpen(false), []);
+      return (
+        <section id="contact" className="scroll-mt-20 px-5 pb-24 sm:px-8">
+          <Reveal className="mx-auto max-w-6xl">
+            <div className="flex flex-col items-start justify-between gap-6 rounded-3xl bg-sea-700 p-8 text-white sm:flex-row sm:items-center sm:p-12">
+              <div>
+                <p className="text-sm font-semibold text-sea-100">CONTACT</p>
+                <h2 className="mt-2 text-2xl font-bold leading-snug sm:text-3xl">함께 이야기 나누고 싶으신가요?</h2>
+                <p className="mt-2 text-sea-100">기획, 개발, 교육 무엇이든 편하게 문의해 주세요.</p>
+              </div>
+              <Button size="lg" variant="secondary" className="shrink-0" onClick={() => setOpen(true)} aria-haspopup="dialog">
+                문의하기 →
+              </Button>
+            </div>
+          </Reveal>
+          <ContactModal isOpen={open} onClose={close} />
+        </section>
+      );
+    }
+
+    // ========================================
+    // 🛠️ Admin (문의 목록)
+    // ========================================
+    const dateFormatter = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' });
+
+    function timeAgo(iso) {
+      const sec = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+      if (sec < 60) return '방금 전';
+      if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+      if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+      if (sec < 86400 * 30) return `${Math.floor(sec / 86400)}일 전`;
+      return null;
+    }
+
+    // ── 경로 이동 (새로고침 없이 /admin ↔ /admin/login 전환) ──
+    function navigate(to, { replace = false } = {}) {
+      window.history[replace ? 'replaceState' : 'pushState']({}, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+
+    function usePathname() {
+      const [pathname, setPathname] = useState(window.location.pathname);
+      useEffect(() => {
+        const onPop = () => setPathname(window.location.pathname);
+        window.addEventListener('popstate', onPop);
+        // 자식 effect 가 먼저 실행되므로, 리스너를 붙이기 전에 일어난 이동(첫 렌더 중 리다이렉트)을 반영한다.
+        onPop();
+        return () => window.removeEventListener('popstate', onPop);
+      }, []);
+      return pathname.replace(/\/+$/, '') || '/';
+    }
+
+    // ── 관리자 토큰 보관 (sessionStorage: 브라우저를 닫으면 로그아웃) ──
+    const TOKEN_KEY = 'about-me:admin-token';
+    const auth = {
+      get() {
+        try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
+      },
+      set(token) {
+        try { sessionStorage.setItem(TOKEN_KEY, token); } catch {}
+      },
+      clear() {
+        try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
+      },
+      // 표시용으로만 토큰 안의 아이디·만료시각을 읽는다 (진짜 검증은 서버가 한다)
+      payload() {
+        try {
+          const part = auth.get().split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+          const data = JSON.parse(atob(part));
+          return data.exp > Date.now() ? data : null;
+        } catch { return null; }
+      },
+    };
+
+    function AdminLoginPage() {
+      const expired = new URLSearchParams(window.location.search).has('expired');
+      const [form, setForm] = useState({ id: '', password: '' });
+      const [showPassword, setShowPassword] = useState(false);
+      const [submitting, setSubmitting] = useState(false);
+      const [error, setError] = useState('');
+
+      useEffect(() => {
+        document.title = '관리자 로그인 | 박건우';
+        if (auth.payload()) navigate('/admin', { replace: true }); // 이미 로그인 상태
+      }, []);
+
+      const update = (field) => (e) => {
+        setForm((f) => ({ ...f, [field]: e.target.value }));
+        if (error) setError('');
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!form.id.trim() || !form.password) {
+          setError('아이디와 비밀번호를 입력해 주세요.');
+          return;
+        }
+        setSubmitting(true);
+        setError('');
+        try {
+          const res = await fetch(`${API_BASE_URL}/admin/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json.success) throw new Error(json.message || '로그인에 실패했습니다.');
+          auth.set(json.data.token);
+          navigate('/admin', { replace: true });
+        } catch (err) {
+          setError(err.message === 'Failed to fetch' ? '서버에 연결할 수 없습니다. server.js 가 실행 중인지 확인해 주세요.' : err.message);
+          setForm((f) => ({ ...f, password: '' }));
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <div className="flex min-h-screen flex-col items-center justify-center px-5 py-12">
+          <div className="w-full max-w-sm">
+            <Card className="p-8">
+              <h1 className="text-2xl font-bold">관리자 로그인</h1>
+              <p className="mt-1 text-sm text-ink/60">문의 목록은 관리자만 볼 수 있습니다.</p>
+
+              {expired && !error && (
+                <p role="status" className="mt-5 rounded-xl bg-sea-50 px-4 py-3 text-sm text-sea-700">
+                  로그인 시간이 만료되었습니다. 다시 로그인해 주세요.
+                </p>
+              )}
+
+              <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
+                <Input id="admin-id" label="아이디" value={form.id} onChange={update('id')} placeholder="아이디" disabled={submitting} autoComplete="username" autoCapitalize="none" spellCheck={false} />
+                <div className="relative">
+                  <Input
+                    id="admin-password"
+                    type={showPassword ? 'text' : 'password'}
+                    label="비밀번호"
+                    value={form.password}
+                    onChange={update('password')}
+                    placeholder="비밀번호"
+                    disabled={submitting}
+                    autoComplete="current-password"
+                    className="[&_input]:pr-16"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-pressed={showPassword}
+                    aria-controls="admin-password"
+                    className="absolute bottom-2 right-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-ink/50 hover:bg-ink/5 hover:text-ink"
+                  >
+                    {showPassword ? '숨기기' : '보기'}
+                  </button>
+                </div>
+                {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+                <Button type="submit" size="lg" className="w-full" disabled={submitting}>
+                  {submitting ? <><Spinner /> 확인 중…</> : '로그인'}
+                </Button>
+              </form>
+            </Card>
+            <a href="/" className="mt-6 block text-center text-sm text-ink/50 hover:text-ink">← 사이트로 돌아가기</a>
+          </div>
+        </div>
+      );
+    }
+
+    function AdminPage() {
+      const session = auth.payload();
+      const [messages, setMessages] = useState([]);
+      const [source, setSource] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+
+      const logout = useCallback((reason) => {
+        auth.clear();
+        navigate(reason === 'expired' ? '/admin/login?expired=1' : '/admin/login', { replace: true });
+      }, []);
+
+      const load = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const res = await fetch(`${API_BASE_URL}/messages`, {
+            headers: { Authorization: `Bearer ${auth.get()}` },
+          });
+          if (res.status === 401) return logout('expired');
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json.success) throw new Error(json.message || '문의 목록을 불러오지 못했습니다.');
+          const sorted = [...json.data].sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
+          setMessages(sorted);
+          setSource(json.source);
+        } catch (err) {
+          setError(err.message === 'Failed to fetch' ? '서버에 연결할 수 없습니다. server.js 가 실행 중인지 확인해 주세요.' : err.message);
+        } finally {
+          setLoading(false);
+        }
+      }, [logout]);
+
+      useEffect(() => {
+        document.title = '문의 관리 | 박건우';
+        if (!session) return logout(); // 로그인 안 했거나 만료 → 로그인 페이지로
+        load();
+      }, [load]);
+
+      if (!session) return null;
+
+      return (
+        <div className="min-h-screen">
+          <header className="sticky top-0 z-40 border-b border-ink/5 bg-sand/90 backdrop-blur">
+            <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-5 py-4 sm:px-8">
+              <span className="text-base font-bold tracking-tight text-ink">관리자</span>
+              <div className="flex items-center gap-1 sm:gap-3">
+                <span className="hidden text-sm text-ink/60 sm:inline"><strong className="font-semibold text-ink">{session.sub}</strong> 님</span>
+                <a href="/" className="rounded-full px-3 py-2 text-sm font-medium text-ink/60 hover:bg-ink/5 hover:text-ink">사이트로</a>
+                <Button variant="secondary" size="sm" onClick={() => logout()}>로그아웃</Button>
+              </div>
+            </div>
+          </header>
+
+          <main className="mx-auto max-w-4xl px-5 py-10 sm:px-8">
+            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-bold">문의 목록</h1>
+                <p className="mt-1 text-sm text-ink/60">
+                  {loading ? '불러오는 중…' : `총 ${messages.length}건 · 최신순`}
+                  {!loading && source && <Badge className="ml-2">{source === 'database' ? 'Supabase DB' : 'messages.json'}</Badge>}
+                </p>
+              </div>
+              <Button variant="secondary" onClick={load} disabled={loading}>
+                {loading ? <Spinner /> : '↻'} 새로고침
+              </Button>
+            </div>
+
+            {error ? (
+              <Card className="text-center">
+                <p className="text-red-600">{error}</p>
+                <Button className="mt-4" onClick={load}>다시 시도</Button>
+              </Card>
+            ) : loading && messages.length === 0 ? (
+              <ul className="space-y-4" aria-hidden="true">
+                {[0, 1, 2].map((i) => <li key={i} className="h-36 animate-pulse rounded-2xl bg-white/70" />)}
+              </ul>
+            ) : messages.length === 0 ? (
+              <Card className="py-16 text-center">
+                <p className="text-4xl" aria-hidden="true">📭</p>
+                <p className="mt-4 font-semibold">아직 받은 문의가 없습니다.</p>
+                <p className="mt-1 text-sm text-ink/60">사이트 하단의 문의하기로 접수된 내용이 여기에 표시됩니다.</p>
+              </Card>
+            ) : (
+              <ul className="space-y-4">
+                {messages.map((m) => {
+                  const ago = timeAgo(m.received_at);
+                  return (
+                    <li key={m.id}>
+                      <Card>
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-bold">{m.name}</p>
+                            <a href={`mailto:${m.email}`} className="break-all text-sm text-sea-600 hover:underline">{m.email}</a>
+                          </div>
+                          <time dateTime={m.received_at} className="text-right text-sm text-ink/50">
+                            {dateFormatter.format(new Date(m.received_at))}
+                            {ago && <span className="block text-xs text-ink/40">{ago}</span>}
+                          </time>
+                        </div>
+                        <p className="mt-4 whitespace-pre-wrap break-words rounded-xl bg-sand p-4 text-sm leading-relaxed text-ink/80">{m.content}</p>
+                      </Card>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function HomePage() {
+      return (
+        <>
+          <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-white focus:px-4 focus:py-2">
+            본문 바로가기
+          </a>
+          <Header />
+          <main id="main">
+            <Hero />
+            <Waves />
+            <SeaSection />
+            <StudySection />
+            <CareerSection />
+            <CodingSection />
+            <GoalsSection />
+            <ContactSection />
+          </main>
+          <Footer />
+        </>
+      );
+    }
+
+    // 서버가 모든 경로에 index.html 을 내려주므로, 경로를 보고 화면을 고른다.
+    //   /             → 자기소개
+    //   /admin/login  → 관리자 로그인
+    //   /admin        → 문의 목록 (로그인 필요)
+    function App() {
+      const pathname = usePathname();
+      if (pathname === '/admin/login') return <AdminLoginPage />;
+      if (pathname === '/admin') return <AdminPage />;
+      return <HomePage />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

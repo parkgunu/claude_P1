@@ -1,0 +1,14 @@
+{
+  "id": "sesame-oil",
+  "name": "참기름",
+  "category": "양념",
+  "quantity": 320,
+  "unit": "ml",
+  "storage": "실온",
+  "purchasedOn": "2026-02-11",
+  "expiresOn": "2027-08-11",
+  "tags": [
+    "양념"
+  ],
+  "note": ""
+}

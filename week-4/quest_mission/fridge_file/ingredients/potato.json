@@ -1,0 +1,14 @@
+{
+  "id": "potato",
+  "name": "감자",
+  "category": "채소",
+  "quantity": 4,
+  "unit": "개",
+  "storage": "실온",
+  "purchasedOn": "2026-09-05",
+  "expiresOn": "2026-10-25",
+  "tags": [
+    "주재료"
+  ],
+  "note": "싹 없음"
+}

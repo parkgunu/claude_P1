@@ -71,11 +71,9 @@ const STAT_ORDER = ['hp', 'attack', 'defense', 'special-attack', 'special-defens
 const EVOLUTION_CHAINS = [
   [1, 2, 3],
   [4, 5, 6],
-  [7, 8, 9],
-  [10, 11, 12],
 ];
 
-// 포켓몬 원본 데이터 — 우선 10마리
+// 포켓몬 원본 데이터 — 우선 5마리
 let pokemons = [
   {
     id: 1, slug: 'bulbasaur', name: '쑥쑥씨', genus: '씨앗포켓몬', generation: 1,
@@ -116,46 +114,6 @@ let pokemons = [
     abilities: [{ name: '맹화', isHidden: false }, { name: '태양의힘', isHidden: true }],
     flavorText: '날카로운 손톱으로 적을 가른다. 강한 상대를 만나면 꼬리의 불꽃이 푸르게 타오른다.',
     captureRate: 45, isLegendary: false, isMythical: false,
-  },
-  {
-    id: 6, slug: 'charizard', name: '창공룡', genus: '화염포켓몬', generation: 1,
-    height: 1.7, weight: 90.5, types: ['fire', 'flying'],
-    stats: { hp: 78, attack: 84, defense: 78, 'special-attack': 109, 'special-defense': 85, speed: 100 },
-    abilities: [{ name: '맹화', isHidden: false }, { name: '태양의힘', isHidden: true }],
-    flavorText: '강한 상대를 찾아 하늘을 난다. 내뿜는 불꽃은 무엇이든 녹여 버릴 만큼 뜨겁다.',
-    captureRate: 45, isLegendary: false, isMythical: false,
-  },
-  {
-    id: 7, slug: 'squirtle', name: '뽀글이', genus: '꼬마거북포켓몬', generation: 1,
-    height: 0.5, weight: 9.0, types: ['water'],
-    stats: { hp: 44, attack: 48, defense: 65, 'special-attack': 50, 'special-defense': 64, speed: 43 },
-    abilities: [{ name: '급류', isHidden: false }, { name: '젖은접시', isHidden: true }],
-    flavorText: '등껍질에 숨어 몸을 지킨다. 반격할 때는 입에서 세찬 거품을 내뿜는다.',
-    captureRate: 45, isLegendary: false, isMythical: false,
-  },
-  {
-    id: 8, slug: 'wartortle', name: '물보라', genus: '거북포켓몬', generation: 1,
-    height: 1.0, weight: 22.5, types: ['water'],
-    stats: { hp: 59, attack: 63, defense: 80, 'special-attack': 65, 'special-defense': 80, speed: 58 },
-    abilities: [{ name: '급류', isHidden: false }, { name: '젖은접시', isHidden: true }],
-    flavorText: '풍성한 꼬리는 장수의 상징이다. 헤엄칠 때는 균형을 잡는 키 역할을 한다.',
-    captureRate: 45, isLegendary: false, isMythical: false,
-  },
-  {
-    id: 9, slug: 'blastoise', name: '대포왕', genus: '조개포켓몬', generation: 1,
-    height: 1.6, weight: 85.5, types: ['water'],
-    stats: { hp: 79, attack: 83, defense: 100, 'special-attack': 85, 'special-defense': 105, speed: 78 },
-    abilities: [{ name: '급류', isHidden: false }, { name: '젖은접시', isHidden: true }],
-    flavorText: '등껍질의 분사구에서 고압의 물을 쏜다. 두꺼운 철판도 뚫을 정도의 위력이다.',
-    captureRate: 45, isLegendary: false, isMythical: false,
-  },
-  {
-    id: 10, slug: 'caterpie', name: '꿈틀이', genus: '벌레포켓몬', generation: 1,
-    height: 0.3, weight: 2.9, types: ['bug'],
-    stats: { hp: 45, attack: 30, defense: 35, 'special-attack': 20, 'special-defense': 20, speed: 45 },
-    abilities: [{ name: '인분', isHidden: false }, { name: '도주', isHidden: true }],
-    flavorText: '머리의 더듬이에서 강한 냄새를 풍겨 적을 쫓아낸다. 잎을 잘 먹어 순식간에 자란다.',
-    captureRate: 255, isLegendary: false, isMythical: false,
   },
 ];
 

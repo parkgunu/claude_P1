@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>실시간 코인 모의투자</title>
+
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ CDN 버전 고정 필수 (Babel 은 반드시 7.x) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <!-- 캔들 차트 (TradingView Lightweight Charts, v4 API 기준이므로 버전 고정) -->
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+
+  <style>
+    /* Tailwind 유틸리티로 표현 불가능한 키프레임 애니메이션 (국내 관례: 상승=빨강 / 하락=파랑) */
+    @keyframes flashUp {
+      0%   { background-color: rgba(239, 68, 68, 0.16); }
+      100% { background-color: transparent; }
+    }
+    @keyframes flashDown {
+      0%   { background-color: rgba(59, 130, 246, 0.16); }
+      100% { background-color: transparent; }
+    }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translate(-50%, 8px); }
+      to   { opacity: 1; transform: translate(-50%, 0); }
+    }
+    .flash-up   { animation: flashUp 1.1s ease-out; }
+    .flash-down { animation: flashDown 1.1s ease-out; }
+    .toast-in   { animation: toastIn .2s ease-out; }
+  </style>
+</head>
+<body class="bg-white text-slate-900">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // ========================================
+    // ⚙️ Config & Constants
+    // ========================================
+
+    const REFRESH_INTERVAL = 5;     // 자동 갱신 주기(초)
+    const ROW_STEP = 100;           // '더 보기' 클릭당 노출 행 수
+    const INITIAL_CASH = 10000000;  // 서버 지갑 초기 현금 (원금 대비 수익률 계산용)
+    const MIN_ORDER_KRW = 5000;     // 서버와 동일한 최소 주문금액
+    const LOGO_URL = (symbol) => `https://static.upbit.com/logos/${symbol}.png`;
+
+    // 시세는 브라우저가 업비트에서 직접 받는다 (업비트 API 는 CORS 허용) → 서버가 꺼져 있어도 가격은 나온다
+    const UPBIT_BASE = 'https://api.upbit.com/v1';
+
+    // 지갑·주문 API 서버 주소
+    // - node server.js 로 연 경우(localhost:3000) / Vercel 배포: 같은 주소
+    // - 파일 더블클릭(file://) 또는 Live Server(127.0.0.1:5500 등)로 연 경우: localhost:3000 으로 호출
+    const IS_LOCAL_HOST = ['localhost', '127.0.0.1'].includes(location.hostname);
+    const API_BASE = location.protocol === 'file:' || (IS_LOCAL_HOST && location.port !== '3000')
+      ? 'http://localhost:3000'
+      : '';
+
+    const SORT_OPTIONS = [
+      { value: 'volume',  label: '거래대금순' },
+      { value: 'gainers', label: '상승률순' },
+      { value: 'losers',  label: '하락률순' },
+      { value: 'price',   label: '가격순' },
+    ];
+
+    const PERCENTS = [10, 25, 50, 100];
+
+    const CANDLE_COUNT = 200;          // 1시간봉 200개 ≈ 최근 8일
+    const CANDLE_REFRESH_MS = 60000;   // 새 봉이 생기도록 1분마다 캔들 재조회 (그 사이엔 현재가로 마지막 봉 갱신)
+    const COLOR_UP = '#dc2626';        // red-600
+    const COLOR_DOWN = '#2563eb';      // blue-600
+    const COLOR_AVG = '#d97706';       // amber-600 (평균 매수가 라인)
+
+    // ========================================
+    // 🛠️ Utils
+    // ========================================
+
+    // 서버 응답 규격 { success, data, message } 을 풀어서 data 만 돌려준다
+    async function api(path, options = {}) {
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api${path}`, {
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        });
+      } catch {
+        throw new Error('지갑 서버에 연결할 수 없습니다. 터미널에서 quest_mission 폴더로 이동해 node server.js 를 실행해 주세요.');
+      }
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.message || `요청에 실패했습니다. (HTTP ${res.status})`);
+      }
+      return body.data;
+    }
+
+    async function upbit(path) {
+      let res;
+      try {
+        res = await fetch(`${UPBIT_BASE}${path}`, { cache: 'no-store' });
+      } catch {
+        throw new Error('업비트 시세를 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
+      }
+      if (!res.ok) {
+        throw new Error(res.status === 429
+          ? '업비트 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요. (429)'
+          : `업비트 시세를 불러오지 못했습니다. (HTTP ${res.status})`);
+      }
+      return res.json();
+    }
+
+    // 업비트 KRW 마켓 목록(한글명) + 전 종목 현재가 → 화면용 코인 목록
+    // 마켓 목록은 자주 바뀌지 않으므로 한 번만 받아 재사용한다
+    let marketInfoPromise = null;
+    async function fetchKrwTickers() {
+      if (!marketInfoPromise) {
+        marketInfoPromise = upbit('/market/all?isDetails=true')
+          .then((list) => new Map(list.filter((m) => m.market.startsWith('KRW-')).map((m) => [m.market, m])))
+          .catch((e) => { marketInfoPromise = null; throw e; });
+      }
+      const [info, tickers] = await Promise.all([marketInfoPromise, upbit('/ticker/all?quote_currencies=KRW')]);
+      return tickers.map((t) => {
+        const m = info.get(t.market);
+        return {
+          market: t.market,
+          symbol: t.market.replace('KRW-', ''),
+          korean_name: m?.korean_name || t.market,
+          english_name: m?.english_name || '',
+          warning: Boolean(m?.market_event?.warning),
+          trade_price: t.trade_price,
+          signed_change_rate: t.signed_change_rate,
+          acc_trade_price_24h: t.acc_trade_price_24h,
+        };
+      });
+    }
+
+    const isNum = (v) => typeof v === 'number' && !Number.isNaN(v);
+    const floor8 = (n) => Math.floor(n * 1e8 + 1e-6) / 1e8;
+
+    // 업비트 원화 호가 표기: 100원 이상은 정수, 그 미만은 소수점 표기
+    function formatPrice(value) {
+      if (!isNum(value)) return '-';
+      const digits = value >= 100 ? 0 : value >= 1 ? 2 : 4;
+      return value.toLocaleString('ko-KR', { maximumFractionDigits: digits });
+    }
+
+    function formatKRW(value) {
+      if (!isNum(value)) return '-';
+      return `${Math.round(value).toLocaleString('ko-KR')}원`;
+    }
+
+    function formatSignedKRW(value) {
+      if (!isNum(value)) return '-';
+      const rounded = Math.round(value);
+      return `${rounded > 0 ? '+' : ''}${rounded.toLocaleString('ko-KR')}원`;
+    }
+
+    function formatVolume(value) {
+      if (!isNum(value)) return '-';
+      return value.toLocaleString('ko-KR', { maximumFractionDigits: 8 });
+    }
+
+    function formatPercent(ratio) {
+      if (!isNum(ratio)) return '-';
+      const pct = ratio * 100;
+      return `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    }
+
+    function formatCompact(value) {
+      if (!isNum(value)) return '-';
+      return new Intl.NumberFormat('ko-KR', { notation: 'compact', maximumFractionDigits: 1 }).format(value) + '원';
+    }
+
+    function formatTime(date) {
+      if (!date) return '-';
+      return date.toLocaleTimeString('ko-KR', { hour12: false });
+    }
+
+    function formatDateTime(iso) {
+      const d = new Date(iso);
+      return d.toLocaleString('ko-KR', {
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      });
+    }
+
+    // 등락 색상 (국내 관례: 상승=빨강 / 하락=파랑 / 보합=회색)
+    function trendColor(value) {
+      if (!isNum(value) || value === 0) return 'text-slate-500';
+      return value > 0 ? 'text-red-600' : 'text-blue-600';
+    }
+
+    // 입력값 → 숫자 (콤마 허용)
+    const parseInput = (text) => Number(String(text).replace(/,/g, ''));
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Card({ children, className = '' }) {
+      return (
+        <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Button({ variant = 'primary', size = 'md', disabled = false, onClick, className = '', children, type = 'button', ...rest }) {
+      const base = 'inline-flex items-center justify-center gap-2 font-medium rounded-xl transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed';
+      const variants = {
+        primary: 'bg-slate-900 hover:bg-slate-700 text-white focus:ring-slate-400',
+        secondary: 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 focus:ring-slate-300',
+        ghost: 'bg-transparent hover:bg-slate-100 text-slate-600 focus:ring-slate-300',
+        buy: 'bg-red-600 hover:bg-red-700 text-white focus:ring-red-300',
+        sell: 'bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-300',
+      };
+      const sizes = {
+        xs: 'text-xs px-2 py-1',
+        sm: 'text-xs px-3 py-1.5',
+        md: 'text-sm px-4 py-2',
+        lg: 'text-base px-5 py-2.5',
+      };
+      return (
+        <button
+          type={type}
+          onClick={onClick}
+          disabled={disabled}
+          className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ value, onChange, placeholder = '', type = 'text', className = '', ...rest }) {
+      return (
+        <input
+          type={type}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          className={`w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 ${className}`}
+          {...rest}
+        />
+      );
+    }
+
+    function Select({ value, onChange, options, className = '', ...rest }) {
+      return (
+        <select
+          value={value}
+          onChange={onChange}
+          className={`rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 ${className}`}
+          {...rest}
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      );
+    }
+
+    function Badge({ tone = 'neutral', className = '', children }) {
+      const tones = {
+        neutral: 'bg-slate-100 text-slate-600',
+        up: 'bg-red-50 text-red-700',
+        down: 'bg-blue-50 text-blue-700',
+        warn: 'bg-amber-50 text-amber-700',
+      };
+      return (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums ${tones[tone]} ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return (
+        <svg className={`animate-spin h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+      );
+    }
+
+    // 업비트 로고가 없는 코인은 심볼 첫 글자로 대체
+    function CoinLogo({ symbol, className = 'h-7 w-7' }) {
+      const [failed, setFailed] = useState(false);
+      if (failed) {
+        return (
+          <span className={`${className} rounded-full shrink-0 bg-slate-100 text-slate-500 text-[11px] font-semibold flex items-center justify-center`} aria-hidden="true">
+            {symbol.slice(0, 1)}
+          </span>
+        );
+      }
+      return (
+        <img
+          src={LOGO_URL(symbol)}
+          alt=""
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className={`${className} rounded-full shrink-0 bg-slate-100`}
+        />
+      );
+    }
+
+    function Toast({ toast, onClose }) {
+      useEffect(() => {
+        if (!toast) return;
+        const timer = setTimeout(onClose, 4000);
+        return () => clearTimeout(timer);
+      }, [toast, onClose]);
+
+      if (!toast) return null;
+      const tone = toast.type === 'error' ? 'bg-red-600' : 'bg-slate-900';
+      return (
+        <div
+          role="status"
+          className={`toast-in fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-[calc(100%-2rem)] w-max px-4 py-3 rounded-xl text-sm text-white shadow-lg ${tone}`}
+        >
+          {toast.message}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🪝 Custom Hooks
+    // ========================================
+
+    function useDebounced(value, delay) {
+      const [debounced, setDebounced] = useState(value);
+      useEffect(() => {
+        const timer = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(timer);
+      }, [value, delay]);
+      return debounced;
+    }
+
+    // 업비트 KRW 전 종목 시세 로딩 + 자동 갱신 + 직전 대비 등락 틱 계산
+    function useMarketData(intervalSec) {
+      const [coins, setCoins] = useState([]);
+      const [ticks, setTicks] = useState({});     // { [market]: 'up' | 'down' }
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [updatedAt, setUpdatedAt] = useState(null);
+
+      const prevPricesRef = useRef({});
+      const tickTimerRef = useRef(null);
+      const requestIdRef = useRef(0);
+
+      const load = useCallback(async () => {
+        const reqId = ++requestIdRef.current;
+        setLoading(true);
+        try {
+          const list = await fetchKrwTickers();
+          if (reqId !== requestIdRef.current) return; // 오래된 응답 무시
+
+          const nextTicks = {};
+          list.forEach((c) => {
+            const prev = prevPricesRef.current[c.market];
+            if (isNum(prev) && prev !== c.trade_price) {
+              nextTicks[c.market] = c.trade_price > prev ? 'up' : 'down';
+            }
+            prevPricesRef.current[c.market] = c.trade_price;
+          });
+
+          setCoins(list);
+          setTicks(nextTicks);
+          setUpdatedAt(new Date());
+          setError(null);
+
+          if (tickTimerRef.current) clearTimeout(tickTimerRef.current);
+          tickTimerRef.current = setTimeout(() => setTicks({}), 1200);
+        } catch (e) {
+          if (reqId !== requestIdRef.current) return;
+          setError(e.message || '알 수 없는 오류가 발생했습니다.');
+        } finally {
+          if (reqId === requestIdRef.current) setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => { load(); }, [load]);
+
+      useEffect(() => {
+        if (!intervalSec) return;
+        const timer = setInterval(load, intervalSec * 1000);
+        return () => clearInterval(timer);
+      }, [load, intervalSec]);
+
+      useEffect(() => () => {
+        if (tickTimerRef.current) clearTimeout(tickTimerRef.current);
+      }, []);
+
+      return { coins, ticks, loading, error, updatedAt, refetch: load };
+    }
+
+    // 지갑(현금 + 보유 코인) & 최근 주문 내역
+    function useWallet() {
+      const [wallet, setWallet] = useState(null); // { cash, holdings: [...] }
+      const [orders, setOrders] = useState([]);
+      const [error, setError] = useState(null);
+
+      const refresh = useCallback(async () => {
+        try {
+          const [w, o] = await Promise.all([api('/wallet'), api('/orders?limit=20')]);
+          setWallet(w);
+          setOrders(o);
+          setError(null);
+        } catch (e) {
+          setError(e.message);
+        }
+      }, []);
+
+      useEffect(() => { refresh(); }, [refresh]);
+
+      return { wallet, orders, error, refresh };
+    }
+
+    function useCountdown(active, seconds, resetKey) {
+      const [left, setLeft] = useState(seconds);
+      useEffect(() => {
+        setLeft(seconds);
+        if (!active) return;
+        const timer = setInterval(() => setLeft((v) => (v > 0 ? v - 1 : 0)), 1000);
+        return () => clearInterval(timer);
+      }, [active, seconds, resetKey]);
+      return left;
+    }
+
+    // ========================================
+    // 🧩 Common Components
+    // ========================================
+
+    function Header({ updatedAt, loading, autoRefresh, onToggleAuto, onRefresh, countdown, total }) {
+      return (
+        <header className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">실시간 코인 모의투자</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                업비트 · KRW 마켓 · 표시 중인 코인{' '}
+                <span className="font-medium text-slate-700 tabular-nums">{total.toLocaleString('ko-KR')}</span>개
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={onToggleAuto} aria-pressed={autoRefresh}>
+                <span
+                  className={`h-2 w-2 rounded-full ${autoRefresh ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}
+                  aria-hidden="true"
+                />
+                {autoRefresh ? `자동 갱신 ${countdown}초 전` : '자동 갱신 꺼짐'}
+              </Button>
+              <Button variant="primary" size="sm" onClick={onRefresh} disabled={loading}>
+                {loading ? <Spinner /> : <span aria-hidden="true">↻</span>}
+                새로고침
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            마지막 갱신 <span className="tabular-nums text-slate-600">{formatTime(updatedAt)}</span>
+            {loading && <span className="ml-2 text-slate-500">불러오는 중…</span>}
+          </p>
+        </header>
+      );
+    }
+
+    function Toolbar({ query, onQueryChange, sort, onSortChange }) {
+      return (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex-1">
+            <Input
+              type="search"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder="코인명 또는 심볼로 검색 (예: 비트코인, bitcoin, BTC)"
+              aria-label="코인 검색"
+            />
+          </div>
+          <Select
+            value={sort}
+            onChange={(e) => onSortChange(e.target.value)}
+            options={SORT_OPTIONS}
+            aria-label="정렬 기준"
+            className="sm:w-40"
+          />
+        </div>
+      );
+    }
+
+    function ErrorState({ message, onRetry }) {
+      return (
+        <Card className="p-6 text-center border-red-200 bg-red-50/50">
+          <p className="text-red-600 font-medium">{message}</p>
+          <p className="mt-1 text-sm text-slate-500">네트워크 상태 또는 업비트 API 응답을 확인해 주세요.</p>
+          <Button variant="secondary" size="sm" className="mt-4" onClick={onRetry}>다시 시도</Button>
+        </Card>
+      );
+    }
+
+    function EmptyState({ query }) {
+      return (
+        <Card className="p-10 text-center">
+          <p className="text-slate-700 font-medium">'{query}' 에 해당하는 코인을 찾지 못했습니다.</p>
+          <p className="mt-1 text-sm text-slate-500">업비트 원화(KRW) 마켓에 상장된 코인만 검색됩니다.</p>
+        </Card>
+      );
+    }
+
+    function SkeletonRow() {
+      return (
+        <div className="flex items-center gap-4 px-4 sm:px-5 py-3.5 animate-pulse">
+          <div className="h-8 w-8 rounded-full bg-slate-100 shrink-0" />
+          <div className="flex-1 space-y-2">
+            <div className="h-3.5 w-28 bg-slate-100 rounded" />
+            <div className="h-2.5 w-12 bg-slate-100 rounded" />
+          </div>
+          <div className="space-y-2 text-right">
+            <div className="h-3.5 w-24 bg-slate-100 rounded ml-auto" />
+            <div className="h-2.5 w-14 bg-slate-100 rounded ml-auto" />
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🕯️ 1시간 캔들 차트
+    // ========================================
+
+    // 업비트 캔들(최신순) → 차트 데이터(오래된순)
+    // KST 시각 문자열을 UTC 로 취급해 넣으면 보는 사람의 시간대와 무관하게 축이 한국 시간으로 표시된다
+    async function fetchHourCandles(market) {
+      const list = await upbit(`/candles/minutes/60?market=${encodeURIComponent(market)}&count=${CANDLE_COUNT}`);
+      return list.reverse().map((c) => ({
+        time: Date.parse(`${c.candle_date_time_kst}Z`) / 1000,
+        open: c.opening_price,
+        high: c.high_price,
+        low: c.low_price,
+        close: c.trade_price,
+        volume: c.candle_acc_trade_volume,
+      }));
+    }
+
+    function priceDigits(price) {
+      return price >= 100 ? 0 : price >= 1 ? 2 : 4;
+    }
+
+    function CandleChart({ market, price, avgPrice }) {
+      const containerRef = useRef(null);
+      const chartRef = useRef(null);      // { chart, candles, volumes }
+      const lastBarRef = useRef(null);
+      const avgLineRef = useRef(null);
+      const avgPriceRef = useRef(avgPrice);
+      const [status, setStatus] = useState('loading'); // loading | ready | error
+      const [error, setError] = useState(null);
+
+      avgPriceRef.current = avgPrice;
+
+      // 차트 생성 / 파기 (마켓이 바뀌면 새로 만든다)
+      useEffect(() => {
+        if (!window.LightweightCharts) {
+          setStatus('error');
+          setError('차트 라이브러리를 불러오지 못했습니다.');
+          return;
+        }
+        const { createChart, CrosshairMode } = window.LightweightCharts;
+        const digits = priceDigits(price);
+
+        const chart = createChart(containerRef.current, {
+          autoSize: true,
+          layout: { background: { color: 'transparent' }, textColor: '#64748b', fontSize: 11 },
+          grid: { vertLines: { color: '#f1f5f9' }, horzLines: { color: '#f1f5f9' } },
+          crosshair: { mode: CrosshairMode.Normal },
+          rightPriceScale: { borderColor: '#e2e8f0' },
+          timeScale: { borderColor: '#e2e8f0', timeVisible: true, secondsVisible: false },
+          localization: {
+            locale: 'ko-KR',
+            priceFormatter: (p) => p.toLocaleString('ko-KR', { maximumFractionDigits: digits }),
+          },
+        });
+
+        const candles = chart.addCandlestickSeries({
+          upColor: COLOR_UP, downColor: COLOR_DOWN,
+          borderUpColor: COLOR_UP, borderDownColor: COLOR_DOWN,
+          wickUpColor: COLOR_UP, wickDownColor: COLOR_DOWN,
+          priceFormat: { type: 'price', precision: digits, minMove: 1 / 10 ** digits },
+          // 평균 매수가가 캔들 범위 밖이어도 라인이 화면에 보이도록 자동 스케일에 포함
+          autoscaleInfoProvider: (original) => {
+            const res = original();
+            const avg = avgPriceRef.current;
+            if (res && avg > 0) {
+              res.priceRange.minValue = Math.min(res.priceRange.minValue, avg);
+              res.priceRange.maxValue = Math.max(res.priceRange.maxValue, avg);
+            }
+            return res;
+          },
+        });
+
+        const volumes = chart.addHistogramSeries({
+          priceScaleId: '',
+          priceFormat: { type: 'volume' },
+          lastValueVisible: false,
+          priceLineVisible: false,
+        });
+        volumes.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+        candles.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.22 } });
+
+        chartRef.current = { chart, candles, volumes };
+
+        let cancelled = false;
+        const load = async (initial) => {
+          try {
+            const bars = await fetchHourCandles(market);
+            if (cancelled) return;
+            candles.setData(bars);
+            volumes.setData(bars.map((b) => ({
+              time: b.time,
+              value: b.volume,
+              color: b.close >= b.open ? 'rgba(220,38,38,0.25)' : 'rgba(37,99,235,0.25)',
+            })));
+            lastBarRef.current = bars[bars.length - 1] || null;
+            if (initial) chart.timeScale().setVisibleLogicalRange({ from: bars.length - 72, to: bars.length + 2 }); // 최근 3일
+            setStatus('ready');
+            setError(null);
+          } catch (e) {
+            if (cancelled) return;
+            if (initial) setStatus('error');
+            setError(e.message);
+          }
+        };
+
+        setStatus('loading');
+        load(true);
+        const timer = setInterval(() => load(false), CANDLE_REFRESH_MS);
+
+        return () => {
+          cancelled = true;
+          clearInterval(timer);
+          chart.remove();
+          chartRef.current = null;
+          lastBarRef.current = null;
+          avgLineRef.current = null;
+        };
+      }, [market]); // eslint-disable-line react-hooks/exhaustive-deps
+
+      // 실시간 현재가로 마지막(진행 중인) 봉 갱신
+      useEffect(() => {
+        const last = lastBarRef.current;
+        if (!chartRef.current || !last || !isNum(price)) return;
+        const bar = { ...last, close: price, high: Math.max(last.high, price), low: Math.min(last.low, price) };
+        lastBarRef.current = bar;
+        chartRef.current.candles.update(bar);
+      }, [price]);
+
+      // 평균 매수가 라인 (보유 중일 때만)
+      useEffect(() => {
+        const refs = chartRef.current;
+        if (!refs || status !== 'ready') return;
+        if (avgLineRef.current) {
+          refs.candles.removePriceLine(avgLineRef.current);
+          avgLineRef.current = null;
+        }
+        if (avgPrice > 0) {
+          avgLineRef.current = refs.candles.createPriceLine({
+            price: avgPrice,
+            color: COLOR_AVG,
+            lineWidth: 2,
+            lineStyle: window.LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: '평균 매수가',
+          });
+        }
+        refs.chart.priceScale('right').applyOptions({ autoScale: true }); // 라인 포함해 스케일 재계산
+      }, [avgPrice, status]);
+
+      const diff = avgPrice > 0 && isNum(price) ? (price - avgPrice) / avgPrice : null;
+
+      return (
+        <div className="rounded-xl border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 pt-2.5 text-xs">
+            <span className="font-medium text-slate-600">1시간봉 <span className="text-slate-400 font-normal">· 최근 {CANDLE_COUNT}개 (KST)</span></span>
+            {avgPrice > 0 && (
+              <span className="flex items-center gap-1.5 tabular-nums">
+                <span className="inline-block w-4 border-t-2 border-dashed border-amber-600" aria-hidden="true" />
+                <span className="text-slate-500">평균 매수가</span>
+                <span className="font-medium text-slate-800">{formatPrice(avgPrice)}원</span>
+                <span className={`font-semibold ${trendColor(diff)}`}>({formatPercent(diff)})</span>
+              </span>
+            )}
+          </div>
+          <div className="relative h-64 sm:h-72">
+            <div ref={containerRef} className="absolute inset-0" />
+            {status !== 'ready' && (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400 bg-white/70">
+                {status === 'loading' ? <><Spinner className="mr-2" />캔들 불러오는 중…</> : <span className="text-red-600">{error}</span>}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 💱 Trade (매수 / 매도)
+    // ========================================
+
+    function TradePanel({ coin, wallet, onOrdered, onToast }) {
+      const [side, setSide] = useState(null); // null → 매수/매도 버튼만 노출
+      const [value, setValue] = useState('');
+      const [memo, setMemo] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+      const [message, setMessage] = useState(null);
+
+      const cash = wallet?.cash ?? 0;
+      const holding = wallet?.holdings.find((h) => h.market === coin.market);
+      const coinBalance = holding?.balance ?? 0;
+      const price = coin.trade_price;
+
+      const chooseSide = (next) => {
+        setSide(next);
+        setValue('');
+        setMessage(null);
+      };
+
+      // 매수는 원화 금액, 매도는 코인 수량으로 입력받는다
+      const numeric = parseInput(value);
+      const valid = isNum(numeric) && numeric > 0;
+      const estimate = !valid ? null
+        : side === 'buy' ? floor8(numeric / price)
+        : Math.round(numeric * price);
+
+      const handleValueChange = (text) => {
+        if (side === 'buy') {
+          const digits = text.replace(/[^\d]/g, '');
+          setValue(digits ? Number(digits).toLocaleString('ko-KR') : '');
+        } else {
+          const cleaned = text.replace(/[^\d.]/g, '');
+          if (/^\d*\.?\d{0,8}$/.test(cleaned)) setValue(cleaned);
+        }
+      };
+
+      const applyPercent = (pct) => {
+        setMessage(null);
+        if (side === 'buy') {
+          const amount = Math.floor((cash * pct) / 100);
+          setValue(amount ? amount.toLocaleString('ko-KR') : '');
+        } else {
+          const vol = pct === 100 ? coinBalance : floor8((coinBalance * pct) / 100);
+          setValue(vol ? String(vol) : '');
+        }
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!valid) {
+          setMessage({ type: 'error', text: side === 'buy' ? '주문 금액을 입력해 주세요.' : '매도 수량을 입력해 주세요.' });
+          return;
+        }
+        setSubmitting(true);
+        setMessage(null);
+        try {
+          const order = await api('/orders', {
+            method: 'POST',
+            body: JSON.stringify({
+              market: coin.market,
+              side,
+              ...(side === 'buy' ? { amount: numeric } : { volume: numeric }),
+              memo,
+            }),
+          });
+          const text = `${coin.korean_name} ${formatVolume(order.volume)} ${coin.symbol} ${side === 'buy' ? '매수' : '매도'} 체결 · ${formatKRW(order.amount)} (체결가 ${formatPrice(order.price)}원)`;
+          setMessage({ type: 'success', text });
+          onToast({ type: 'success', message: text });
+          setValue('');
+          setMemo('');
+          onOrdered();
+        } catch (err) {
+          setMessage({ type: 'error', text: err.message });
+          onToast({ type: 'error', message: `주문 거절: ${err.message}` });
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      const isBuy = side === 'buy';
+
+      return (
+        <div className="px-4 sm:px-5 pb-4 pt-3 bg-slate-50/70 border-t border-slate-100">
+          <CandleChart market={coin.market} price={price} avgPrice={holding?.avg_buy_price ?? 0} />
+
+          <div className="grid grid-cols-2 gap-2 pt-3">
+            <Button
+              variant={isBuy ? 'buy' : 'secondary'}
+              onClick={() => chooseSide('buy')}
+              aria-pressed={isBuy}
+            >
+              매수
+            </Button>
+            <Button
+              variant={side === 'sell' ? 'sell' : 'secondary'}
+              onClick={() => chooseSide('sell')}
+              aria-pressed={side === 'sell'}
+            >
+              매도
+            </Button>
+          </div>
+
+          {side && (
+            <form onSubmit={handleSubmit} className="mt-3 space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>{isBuy ? '주문 가능 현금' : '매도 가능 수량'}</span>
+                <span className="tabular-nums font-medium text-slate-700">
+                  {isBuy ? formatKRW(cash) : `${formatVolume(coinBalance)} ${coin.symbol}`}
+                </span>
+              </div>
+
+              <div className="relative">
+                <Input
+                  inputMode="decimal"
+                  value={value}
+                  onChange={(e) => handleValueChange(e.target.value)}
+                  placeholder={isBuy ? `주문 금액 (최소 ${MIN_ORDER_KRW.toLocaleString('ko-KR')}원)` : '매도 수량'}
+                  aria-label={isBuy ? '주문 금액' : '매도 수량'}
+                  className="pr-14 text-right tabular-nums"
+                  autoFocus
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                  {isBuy ? 'KRW' : coin.symbol}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-1.5">
+                {PERCENTS.map((pct) => (
+                  <Button key={pct} variant="secondary" size="xs" onClick={() => applyPercent(pct)}>
+                    {pct === 100 ? '최대' : `${pct}%`}
+                  </Button>
+                ))}
+              </div>
+
+              <Input
+                value={memo}
+                onChange={(e) => setMemo(e.target.value)}
+                placeholder="메모 (선택, 예: 분할매수 1차)"
+                aria-label="주문 메모"
+                maxLength={200}
+              />
+
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>{isBuy ? '예상 체결 수량' : '예상 체결 금액'} · 현재가 {formatPrice(price)}원</span>
+                <span className="tabular-nums font-medium text-slate-700">
+                  {estimate === null ? '-' : isBuy ? `${formatVolume(estimate)} ${coin.symbol}` : formatKRW(estimate)}
+                </span>
+              </div>
+
+              <Button type="submit" variant={isBuy ? 'buy' : 'sell'} className="w-full" disabled={submitting}>
+                {submitting && <Spinner />}
+                {coin.korean_name} {isBuy ? '매수' : '매도'}하기
+              </Button>
+
+              <p className="text-[11px] text-slate-400">시장가 즉시 체결 · 수수료 미반영 · 체결가는 주문 시점 업비트 현재가</p>
+            </form>
+          )}
+
+          {message && (
+            <p
+              role="status"
+              className={`mt-3 text-xs rounded-lg px-3 py-2 ${message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}
+            >
+              {message.text}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📋 Coin List
+    // ========================================
+
+    function CoinRow({ coin, rank, tick, expanded, onToggle, wallet, onOrdered, onToast }) {
+      const change = coin.signed_change_rate;
+      const flashClass = tick === 'up' ? 'flash-up' : tick === 'down' ? 'flash-down' : '';
+      const held = wallet?.holdings.some((h) => h.market === coin.market);
+
+      return (
+        <li className={`border-b border-slate-100 last:border-b-0 ${expanded ? 'bg-slate-50/40' : ''}`}>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className={`w-full text-left flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3.5 hover:bg-slate-50/70 focus:outline-none focus-visible:bg-slate-100 ${flashClass}`}
+          >
+            <span className="w-8 shrink-0 text-xs text-slate-400 tabular-nums">{rank}</span>
+
+            <CoinLogo symbol={coin.symbol} />
+
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-slate-900 truncate flex items-center gap-1.5">
+                <span className="truncate">{coin.korean_name}</span>
+                {held && <Badge tone="neutral" className="shrink-0">보유</Badge>}
+                {coin.warning && <Badge tone="warn" className="shrink-0">유의</Badge>}
+              </p>
+              <p className="text-xs text-slate-400">{coin.symbol}/KRW</p>
+            </div>
+
+            <div className="hidden md:block w-28 text-right text-sm text-slate-500 tabular-nums">
+              {formatCompact(coin.acc_trade_price_24h)}
+            </div>
+
+            <div className="w-32 sm:w-36 text-right shrink-0">
+              <p className={`font-semibold tabular-nums ${trendColor(change)}`}>
+                {formatPrice(coin.trade_price)}
+              </p>
+              <div className="mt-0.5 flex items-center justify-end gap-1">
+                {tick && (
+                  <span className={`text-[10px] ${tick === 'up' ? 'text-red-600' : 'text-blue-600'}`} aria-hidden="true">
+                    {tick === 'up' ? '▲' : '▼'}
+                  </span>
+                )}
+                <Badge tone={change > 0 ? 'up' : change < 0 ? 'down' : 'neutral'}>
+                  <span aria-hidden="true">{change > 0 ? '▲' : change < 0 ? '▼' : '–'}</span>
+                  {formatPercent(change)}
+                  <span className="sr-only">전일 대비 등락률</span>
+                </Badge>
+              </div>
+            </div>
+          </button>
+
+          {expanded && (
+            <TradePanel coin={coin} wallet={wallet} onOrdered={onOrdered} onToast={onToast} />
+          )}
+        </li>
+      );
+    }
+
+    function ListHeader() {
+      return (
+        <div className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-2.5 border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-500 rounded-t-2xl">
+          <span className="w-8 shrink-0">#</span>
+          <span className="w-7 shrink-0" aria-hidden="true" />
+          <span className="flex-1">코인 <span className="text-slate-400 font-normal">· 클릭해서 주문</span></span>
+          <span className="hidden md:block w-28 text-right">거래대금(24h)</span>
+          <span className="w-32 sm:w-36 text-right">현재가 / 전일대비</span>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 👛 My Wallet
+    // ========================================
+
+    function Stat({ label, value, className = '' }) {
+      return (
+        <div className="min-w-0">
+          <p className="text-xs text-slate-500">{label}</p>
+          <p className={`mt-0.5 font-semibold tabular-nums truncate ${className}`}>{value}</p>
+        </div>
+      );
+    }
+
+    function WalletPanel({ wallet, error, priceMap, onSelect }) {
+      // 보유 코인별 평가액/수익률은 실시간 시세로 계산
+      const rows = useMemo(() => (wallet?.holdings || []).map((h) => {
+        const price = priceMap[h.market]?.trade_price ?? h.avg_buy_price; // 시세 없으면 평단으로 대체
+        const buyAmount = h.balance * h.avg_buy_price;
+        const evalAmount = h.balance * price;
+        const profit = evalAmount - buyAmount;
+        return {
+          ...h,
+          symbol: h.currency,
+          price,
+          buyAmount,
+          evalAmount,
+          profit,
+          rate: buyAmount > 0 ? profit / buyAmount : 0,
+        };
+      }).sort((a, b) => b.evalAmount - a.evalAmount), [wallet, priceMap]);
+
+      if (error && !wallet) {
+        return (
+          <Card className="p-5">
+            <h2 className="font-semibold">나의 지갑</h2>
+            <p className="mt-2 text-sm text-red-600">{error}</p>
+          </Card>
+        );
+      }
+
+      if (!wallet) {
+        return (
+          <Card className="p-5 animate-pulse space-y-3">
+            <div className="h-4 w-20 bg-slate-100 rounded" />
+            <div className="h-8 w-40 bg-slate-100 rounded" />
+            <div className="h-16 bg-slate-100 rounded" />
+          </Card>
+        );
+      }
+
+      const buyTotal = rows.reduce((s, r) => s + r.buyAmount, 0);
+      const evalTotal = rows.reduce((s, r) => s + r.evalAmount, 0);
+      const profitTotal = evalTotal - buyTotal;
+      const rateTotal = buyTotal > 0 ? profitTotal / buyTotal : 0;
+      const assetTotal = wallet.cash + evalTotal;
+      const totalReturn = (assetTotal - INITIAL_CASH) / INITIAL_CASH;
+
+      return (
+        <Card className="overflow-hidden">
+          <div className="p-5 space-y-4">
+            <div className="flex items-baseline justify-between">
+              <h2 className="font-semibold">나의 지갑</h2>
+              <span className="text-xs text-slate-400">원금 {formatKRW(INITIAL_CASH)}</span>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-500">총 보유자산</p>
+              <p className="mt-0.5 text-2xl font-bold tabular-nums">{formatKRW(assetTotal)}</p>
+              <p className={`text-xs font-medium tabular-nums ${trendColor(totalReturn)}`}>
+                원금 대비 {formatSignedKRW(assetTotal - INITIAL_CASH)} ({formatPercent(totalReturn)})
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 pt-3 border-t border-slate-100">
+              <Stat label="보유 현금" value={formatKRW(wallet.cash)} />
+              <Stat label="총 매수금액" value={formatKRW(buyTotal)} />
+              <Stat label="총 평가금액" value={formatKRW(evalTotal)} />
+              <Stat label="평가손익" value={formatSignedKRW(profitTotal)} className={trendColor(profitTotal)} />
+              <Stat label="수익률" value={formatPercent(rateTotal)} className={trendColor(rateTotal)} />
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200">
+            <p className="px-5 py-2.5 text-xs font-medium text-slate-500 bg-slate-50/70">
+              보유 코인 {rows.length}종
+            </p>
+            {rows.length === 0 ? (
+              <p className="px-5 py-6 text-center text-sm text-slate-400">
+                보유한 코인이 없습니다.<br />시세 목록에서 코인을 클릭해 매수해 보세요.
+              </p>
+            ) : (
+              <ul>
+                {rows.map((r) => (
+                  <li key={r.market} className="border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => onSelect(r)}
+                      className="w-full text-left px-5 py-3 hover:bg-slate-50 focus:outline-none focus-visible:bg-slate-100"
+                    >
+                      <div className="flex items-center gap-2">
+                        <CoinLogo symbol={r.symbol} className="h-6 w-6" />
+                        <span className="font-medium truncate flex-1">{r.korean_name}</span>
+                        <span className={`text-sm font-semibold tabular-nums ${trendColor(r.rate)}`}>
+                          {formatPercent(r.rate)}
+                        </span>
+                      </div>
+                      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs tabular-nums">
+                        <dt className="text-slate-400">보유수량</dt>
+                        <dd className="text-right text-slate-700">{formatVolume(r.balance)} {r.symbol}</dd>
+                        <dt className="text-slate-400">매수평균가</dt>
+                        <dd className="text-right text-slate-700">{formatPrice(r.avg_buy_price)}원</dd>
+                        <dt className="text-slate-400">현재가</dt>
+                        <dd className={`text-right ${trendColor(r.price - r.avg_buy_price)}`}>{formatPrice(r.price)}원</dd>
+                        <dt className="text-slate-400">평가금액</dt>
+                        <dd className="text-right text-slate-900 font-medium">{formatKRW(r.evalAmount)}</dd>
+                        <dt className="text-slate-400">평가손익</dt>
+                        <dd className={`text-right font-medium ${trendColor(r.profit)}`}>{formatSignedKRW(r.profit)}</dd>
+                      </dl>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+      );
+    }
+
+    function OrderHistory({ orders, priceMap }) {
+      return (
+        <Card className="overflow-hidden">
+          <p className="px-5 py-3 text-sm font-semibold border-b border-slate-200">최근 체결 내역</p>
+          {orders.length === 0 ? (
+            <p className="px-5 py-6 text-center text-sm text-slate-400">아직 주문 내역이 없습니다.</p>
+          ) : (
+            <ul className="max-h-96 overflow-y-auto">
+              {orders.map((o) => {
+                const isBuy = o.side === 'buy';
+                const symbol = o.market.replace('KRW-', '');
+                return (
+                  <li key={o.id} className="px-5 py-3 border-b border-slate-100 last:border-b-0 text-xs">
+                    <div className="flex items-center gap-2">
+                      <Badge tone={isBuy ? 'up' : 'down'}>{isBuy ? '매수' : '매도'}</Badge>
+                      <span className="font-medium text-sm text-slate-800 truncate flex-1">
+                        {priceMap[o.market]?.korean_name || symbol}
+                      </span>
+                      <span className="text-slate-400 tabular-nums">{formatDateTime(o.ordered_at)}</span>
+                    </div>
+                    <div className="mt-1.5 flex justify-between gap-2 tabular-nums text-slate-600">
+                      <span>{formatVolume(o.volume)} {symbol} @ {formatPrice(o.price)}원</span>
+                      <span className="font-medium text-slate-800">{formatKRW(o.amount)}</span>
+                    </div>
+                    {o.memo && <p className="mt-1 text-slate-400 truncate">📝 {o.memo}</p>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+
+    function App() {
+      const [rawQuery, setRawQuery] = useState('');
+      const [sort, setSort] = useState('volume');
+      const [visible, setVisible] = useState(ROW_STEP);
+      const [autoRefresh, setAutoRefresh] = useState(true);
+      const [selected, setSelected] = useState(null); // 주문 패널이 열린 market
+      const [toast, setToast] = useState(null);
+
+      const query = useDebounced(rawQuery.trim(), 200);
+      const isSearching = Boolean(query);
+
+      const { coins, ticks, loading, error, updatedAt, refetch } = useMarketData(autoRefresh ? REFRESH_INTERVAL : 0);
+      const { wallet, orders, error: walletError, refresh: refreshWallet } = useWallet();
+
+      const countdown = useCountdown(autoRefresh, REFRESH_INTERVAL, updatedAt);
+
+      useEffect(() => { setVisible(ROW_STEP); }, [query]);
+
+      // 지갑 서버가 늦게 켜져도 시세 갱신 주기에 맞춰 다시 연결을 시도한다
+      useEffect(() => {
+        if (walletError) refreshWallet();
+      }, [updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+      const priceMap = useMemo(() => Object.fromEntries(coins.map((c) => [c.market, c])), [coins]);
+
+      // 순위(#)는 거래대금 기준으로 고정
+      const rankMap = useMemo(() => {
+        const byVolume = [...coins].sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h);
+        return Object.fromEntries(byVolume.map((c, i) => [c.market, i + 1]));
+      }, [coins]);
+
+      // 주문 패널이 열려 있는 동안에는 시세가 갱신돼도 행 순서를 고정한다 (클릭 대상이 밀리지 않도록)
+      const frozenOrderRef = useRef(null);
+      const sorted = useMemo(() => {
+        const q = query.replace(/\s+/g, '').toLowerCase();
+        const list = q
+          ? coins.filter((c) =>
+              [c.korean_name, c.english_name, c.symbol].some((s) => s.replace(/\s+/g, '').toLowerCase().includes(q)))
+          : [...coins];
+
+        const frozen = frozenOrderRef.current;
+        if (selected && frozen?.sort === sort && frozen?.query === query) {
+          const index = (c) => frozen.order.get(c.market) ?? 1e9;
+          return list.sort((a, b) => index(a) - index(b));
+        }
+
+        if (sort === 'gainers') list.sort((a, b) => b.signed_change_rate - a.signed_change_rate);
+        else if (sort === 'losers') list.sort((a, b) => a.signed_change_rate - b.signed_change_rate);
+        else if (sort === 'price') list.sort((a, b) => b.trade_price - a.trade_price);
+        else list.sort((a, b) => b.acc_trade_price_24h - a.acc_trade_price_24h);
+
+        frozenOrderRef.current = { sort, query, order: new Map(list.map((c, i) => [c.market, i])) };
+        return list;
+      }, [coins, sort, query, selected]);
+
+      const shown = isSearching ? sorted : sorted.slice(0, visible);
+      const canLoadMore = !isSearching && visible < sorted.length;
+
+      const handleRefresh = () => {
+        refetch();
+        refreshWallet();
+      };
+
+      // 지갑에서 보유 코인을 누르면 목록에서 해당 코인을 찾아 주문 패널을 연다
+      const handleSelectHolding = (h) => {
+        setRawQuery(h.symbol);
+        setSelected(h.market);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      const closeToast = useCallback(() => setToast(null), []);
+      const isInitialLoading = loading && coins.length === 0;
+
+      return (
+        <main className="min-h-screen px-4 py-8 sm:py-12">
+          <div className="mx-auto w-full max-w-6xl space-y-5">
+            <Header
+              updatedAt={updatedAt}
+              loading={loading}
+              autoRefresh={autoRefresh}
+              onToggleAuto={() => setAutoRefresh((v) => !v)}
+              onRefresh={handleRefresh}
+              countdown={countdown}
+              total={sorted.length}
+            />
+
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+              <section className="space-y-5 min-w-0" aria-label="코인 시세">
+                <Toolbar query={rawQuery} onQueryChange={setRawQuery} sort={sort} onSortChange={setSort} />
+
+                {error && coins.length === 0 && <ErrorState message={error} onRetry={refetch} />}
+
+                {error && coins.length > 0 && (
+                  <p className="text-xs text-amber-600 px-1" role="status">
+                    갱신 실패: {error} (아래는 마지막으로 받은 시세입니다)
+                  </p>
+                )}
+
+                {isInitialLoading ? (
+                  <Card className="overflow-hidden divide-y divide-slate-100">
+                    {Array.from({ length: 10 }, (_, i) => <SkeletonRow key={i} />)}
+                  </Card>
+                ) : shown.length === 0 && !loading ? (
+                  isSearching ? <EmptyState query={query} /> : null
+                ) : (
+                  <Card className="overflow-hidden">
+                    <ListHeader />
+                    <ul>
+                      {shown.map((coin) => (
+                        <CoinRow
+                          key={coin.market}
+                          coin={coin}
+                          rank={rankMap[coin.market]}
+                          tick={ticks[coin.market]}
+                          expanded={selected === coin.market}
+                          onToggle={() => setSelected((m) => (m === coin.market ? null : coin.market))}
+                          wallet={wallet}
+                          onOrdered={refreshWallet}
+                          onToast={setToast}
+                        />
+                      ))}
+                    </ul>
+                  </Card>
+                )}
+
+                {canLoadMore && !isInitialLoading && (
+                  <div className="flex justify-center">
+                    <Button variant="secondary" onClick={() => setVisible((v) => v + ROW_STEP)}>
+                      더 보기 (+{Math.min(ROW_STEP, sorted.length - visible)}개)
+                    </Button>
+                  </div>
+                )}
+              </section>
+
+              <aside className="space-y-5 lg:sticky lg:top-6 order-first lg:order-none" aria-label="나의 지갑">
+                <WalletPanel wallet={wallet} error={walletError} priceMap={priceMap} onSelect={handleSelectHolding} />
+                <OrderHistory orders={orders} priceMap={priceMap} />
+              </aside>
+            </div>
+
+            <p className="text-center text-xs text-slate-400 pt-2">
+              데이터 제공: 업비트 · 시세는 {REFRESH_INTERVAL}초 주기로 갱신됩니다 · 모의투자이며 실제 주문이 체결되지 않습니다.
+            </p>
+          </div>
+
+          <Toast toast={toast} onClose={closeToast} />
+        </main>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

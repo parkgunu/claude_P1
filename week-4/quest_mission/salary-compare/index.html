@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>월급비교소 · 익명 월급/지출 비교</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN 은 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 이 깨진다) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <script>
+    // 차트 색: 1번(파랑) = 참여자/평균, 2번(주황) = 나. 텍스트에는 시리즈 색을 쓰지 않는다.
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            series: { avg: '#2a78d6', me: '#eb6834' },
+            surface: '#fcfcfb',
+          },
+          fontFamily: {
+            sans: ['Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+    @keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fade-up 0.25s ease-out both; }
+    .bar-grow { transition: height 0.4s ease, width 0.4s ease; }
+    .tabular { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-900 font-sans antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useMemo, useCallback, useContext, createContext } = React;
+
+    // ========================================
+    // ⚙️ Config & Utils
+    // ========================================
+    const API_BASE_URL = '/api';
+    const STORAGE_KEY = 'salary-compare:my-record';
+
+    async function apiRequest(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      let body = null;
+      try { body = await res.json(); } catch (_) { /* JSON 아님 */ }
+      if (!res.ok || !body || !body.success) {
+        throw new Error((body && body.message) || `요청에 실패했습니다. (${res.status})`);
+      }
+      return body.data;
+    }
+
+    function useFetch(endpoint) {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [nonce, setNonce] = useState(0);
+
+      useEffect(() => {
+        if (!endpoint) { setLoading(false); return; }
+        let cancelled = false;
+        setLoading(true);
+        setError(null);
+        apiRequest(endpoint)
+          .then((d) => { if (!cancelled) setData(d); })
+          .catch((e) => { if (!cancelled) setError(e); })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [endpoint, nonce]);
+
+      const reload = useCallback(() => setNonce((n) => n + 1), []);
+      return { data, loading, error, reload };
+    }
+
+    // localStorage 는 막혀 있을 수 있으므로 항상 try/catch
+    const storage = {
+      load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (_) { return null; } },
+      save(v) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch (_) {} },
+      clear() { try { localStorage.removeItem(STORAGE_KEY); } catch (_) {} },
+    };
+
+    // 원 → "312.5만원"
+    function formatManwon(won, digits = 1) {
+      if (won === null || won === undefined || Number.isNaN(won)) return '-';
+      const man = won / 10000;
+      return `${man.toLocaleString('ko-KR', { maximumFractionDigits: digits })}만원`;
+    }
+    const formatPercent = (ratio) =>
+      ratio === null || ratio === undefined ? '-' : `${(ratio * 100).toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`;
+    const formatSigned = (won) => `${won > 0 ? '+' : won < 0 ? '−' : '±'}${formatManwon(Math.abs(won))}`;
+
+    // "12.5" (만원 문자열) → 125000 (원). 빈 값은 0
+    const manwonToWon = (s) => (s === '' || s === undefined ? 0 : Math.round(parseFloat(s) * 10000));
+    const sanitizeDecimal = (s) => s.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1').replace(/^(\d*\.\d).*$/, '$1');
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled, onClick, type = 'button', className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-stone-900 text-white hover:bg-stone-700 focus-visible:ring-stone-900',
+        secondary: 'bg-white text-stone-800 border border-stone-300 hover:bg-stone-50 focus-visible:ring-stone-400',
+        danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600',
+        ghost: 'text-stone-600 hover:bg-stone-200/60 hover:text-stone-900 focus-visible:ring-stone-400',
+      };
+      const sizes = { sm: 'px-3 py-1.5 text-sm', md: 'px-4 py-2.5 text-sm', lg: 'px-6 py-3 text-base' };
+      return (
+        <button
+          type={type}
+          disabled={disabled}
+          onClick={onClick}
+          className={`inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Input({ id, type = 'text', label, hint, value, onChange, placeholder, error, disabled, suffix, className = '', ...rest }) {
+      return (
+        <div className={className}>
+          {label && (
+            <label htmlFor={id} className="mb-1 flex items-baseline justify-between gap-2 text-sm font-medium text-stone-800">
+              <span>{label}</span>
+              {hint && <span className="truncate text-xs font-normal text-stone-500">{hint}</span>}
+            </label>
+          )}
+          <div className="relative">
+            <input
+              id={id}
+              type={type}
+              value={value}
+              onChange={onChange}
+              placeholder={placeholder}
+              disabled={disabled}
+              aria-invalid={!!error}
+              aria-describedby={error ? `${id}-error` : undefined}
+              className={`tabular w-full rounded-lg border bg-white px-3 py-2.5 text-right text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 disabled:bg-stone-100 ${suffix ? 'pr-12' : ''} ${error ? 'border-red-400 focus:ring-red-300' : 'border-stone-300 focus:border-stone-500 focus:ring-stone-200'}`}
+              {...rest}
+            />
+            {suffix && <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-stone-500">{suffix}</span>}
+          </div>
+          {error && <p id={`${id}-error`} className="mt-1 text-xs text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Select({ id, label, value, onChange, options, placeholder, error, className = '' }) {
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="mb-1 block text-sm font-medium text-stone-800">{label}</label>}
+          <select
+            id={id}
+            value={value}
+            onChange={onChange}
+            aria-invalid={!!error}
+            className={`w-full rounded-lg border bg-white px-3 py-2.5 text-stone-900 focus:outline-none focus:ring-2 ${error ? 'border-red-400 focus:ring-red-300' : 'border-stone-300 focus:border-stone-500 focus:ring-stone-200'}`}
+          >
+            {placeholder !== undefined && <option value="">{placeholder}</option>}
+            {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children, as: Tag = 'section', ...rest }) {
+      return <Tag className={`rounded-2xl border border-stone-200 bg-surface p-5 shadow-sm sm:p-6 ${className}`} {...rest}>{children}</Tag>;
+    }
+
+    function CardTitle({ title, subtitle, right }) {
+      return (
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-stone-900">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-sm text-stone-500">{subtitle}</p>}
+          </div>
+          {right}
+        </div>
+      );
+    }
+
+    function Badge({ tone = 'neutral', children, className = '' }) {
+      const tones = {
+        neutral: 'bg-stone-200 text-stone-700',
+        warning: 'bg-amber-100 text-amber-800',
+        info: 'bg-sky-100 text-sky-800',
+      };
+      return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]} ${className}`}>{children}</span>;
+    }
+
+    function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' };
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <div className="absolute inset-0 bg-stone-900/40" onClick={onClose} />
+          <div className={`fade-up relative w-full ${sizes[size]} rounded-2xl bg-white p-6 shadow-xl`}>
+            <h3 id="modal-title" className="text-lg font-bold">{title}</h3>
+            <div className="mt-3">{children}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Tabs({ tabs, value, onChange, label }) {
+      return (
+        <div role="tablist" aria-label={label} className="inline-flex flex-wrap gap-1 rounded-xl bg-stone-200/70 p-1">
+          {tabs.map((t) => (
+            <button
+              key={t.value}
+              role="tab"
+              aria-selected={value === t.value}
+              onClick={() => onChange(t.value)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-500 ${value === t.value ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Spinner({ label = '불러오는 중…' }) {
+      return (
+        <div className="flex items-center justify-center gap-3 py-16 text-stone-500" role="status">
+          <span className="spinner h-5 w-5 rounded-full border-2 border-stone-300 border-t-stone-700" />
+          <span className="text-sm">{label}</span>
+        </div>
+      );
+    }
+
+    function EmptyState({ icon = '📭', title, description, action }) {
+      return (
+        <div className="flex flex-col items-center px-4 py-14 text-center">
+          <div className="text-4xl" aria-hidden="true">{icon}</div>
+          <p className="mt-3 font-semibold text-stone-800">{title}</p>
+          {description && <p className="mt-1 max-w-sm text-sm text-stone-500">{description}</p>}
+          {action && <div className="mt-5">{action}</div>}
+        </div>
+      );
+    }
+
+    function ErrorState({ error, onRetry }) {
+      return (
+        <EmptyState
+          icon="⚠️"
+          title="데이터를 불러오지 못했어요"
+          description={error?.message}
+          action={onRetry && <Button variant="secondary" onClick={onRetry}>다시 시도</Button>}
+        />
+      );
+    }
+
+    function StatTile({ label, value, sub, className = '' }) {
+      return (
+        <div className={`rounded-2xl border border-stone-200 bg-surface p-4 sm:p-5 ${className}`}>
+          <p className="text-xs font-medium text-stone-500 sm:text-sm">{label}</p>
+          <p className="tabular mt-1 text-xl font-bold text-stone-900 sm:text-2xl">{value}</p>
+          {sub && <p className="tabular mt-0.5 text-xs text-stone-500">{sub}</p>}
+        </div>
+      );
+    }
+
+    // ── Chart primitives ─────────────────────────
+
+    function Legend({ items }) {
+      return (
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-600">
+          {items.map((it) => (
+            <li key={it.label} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm" style={{ background: it.color }} aria-hidden="true" />
+              {it.label}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    // 세로 막대 히스토그램. highlight 구간은 "나" 색으로 칠한다.
+    function Histogram({ buckets, highlight = null, unitLabel = '명', ariaLabel }) {
+      const shown = useMemo(() => {
+        let last = 0;
+        buckets.forEach((b) => { if (b.count > 0) last = b.bucket; });
+        if (highlight !== null) last = Math.max(last, highlight);
+        const end = Math.min(buckets.length - 1, Math.max(last + 1, 9));
+        return buckets.slice(0, end + 1);
+      }, [buckets, highlight]);
+      const max = Math.max(1, ...shown.map((b) => b.count));
+      const rangeLabel = (b) => (b.to === null ? `${formatManwon(b.from, 0)} 이상` : `${formatManwon(b.from, 0)} ~ ${formatManwon(b.to, 0)}`);
+      const tickEvery = shown.length > 14 ? 4 : 2;
+
+      return (
+        <figure aria-label={ariaLabel}>
+          <div className="relative flex h-44 items-end gap-[2px] border-b border-stone-300 sm:h-52">
+            <span className="tabular absolute -top-1 left-0 text-[11px] text-stone-400">최대 {max}{unitLabel}</span>
+            <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-stone-200" />
+            {shown.map((b) => {
+              const isMe = highlight === b.bucket;
+              const h = b.count === 0 ? 0 : Math.max(3, (b.count / max) * 100);
+              return (
+                <div
+                  key={b.bucket}
+                  tabIndex={0}
+                  className="group relative flex h-full flex-1 items-end focus:outline-none"
+                  aria-label={`${rangeLabel(b)}: ${b.count}${unitLabel}${isMe ? ' (내 구간)' : ''}`}
+                >
+                  <div
+                    className={`bar-grow w-full rounded-t-[4px] group-hover:opacity-80 group-focus:ring-2 group-focus:ring-stone-500 ${isMe ? 'bg-series-me' : 'bg-series-avg'}`}
+                    style={{ height: `${h}%` }}
+                  />
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-stone-900 px-2 py-1 text-xs text-white shadow group-hover:block group-focus:block">
+                    <span className="tabular">{rangeLabel(b)}</span> · <b className="tabular">{b.count}{unitLabel}</b>{isMe && ' · 나'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-1 flex gap-[2px]" aria-hidden="true">
+            {shown.map((b, i) => (
+              <div key={b.bucket} className="tabular flex-1 overflow-visible whitespace-nowrap text-[10px] text-stone-500 sm:text-[11px]">
+                {i % tickEvery === 0 ? (b.to === null ? `${b.from / 10000}+` : b.from / 10000) : ''}
+              </div>
+            ))}
+          </div>
+          <figcaption className="mt-1 text-right text-[11px] text-stone-400">단위: 만원</figcaption>
+        </figure>
+      );
+    }
+
+    // 가로 막대 목록 (값 직접 라벨)
+    function HBarList({ rows, format = formatManwon, highlightKey }) {
+      const max = Math.max(1, ...rows.map((r) => r.value || 0));
+      return (
+        <ul className="space-y-2.5">
+          {rows.map((r) => (
+            <li key={r.key} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-3 text-sm sm:grid-cols-[8rem_1fr_auto]">
+              <span className={`truncate ${highlightKey === r.key ? 'font-bold text-stone-900' : 'text-stone-700'}`} title={r.label}>
+                {r.label}
+                {r.meta && <span className="ml-1 text-xs text-stone-400">{r.meta}</span>}
+              </span>
+              <div className="h-3 rounded-r-[4px] bg-stone-100">
+                <div className="bar-grow h-full rounded-r-[4px] bg-series-avg" style={{ width: `${((r.value || 0) / max) * 100}%` }} />
+              </div>
+              <span className="tabular min-w-[4.5rem] text-right text-stone-800">{r.value === null ? '-' : format(r.value)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    // 카테고리별 "나 vs 평균" 쌍 막대
+    function PairedBars({ rows }) {
+      const max = Math.max(1, ...rows.flatMap((r) => [r.me || 0, r.avg || 0]));
+      return (
+        <ul className="space-y-3.5">
+          {rows.map((r) => {
+            const diff = r.avg === null ? null : r.me - r.avg;
+            return (
+              <li key={r.key} className="grid grid-cols-[5.5rem_1fr] items-center gap-3 text-sm sm:grid-cols-[7.5rem_1fr_8.5rem]">
+                <span className="truncate text-stone-700" title={r.hint}>{r.label}</span>
+                <div className="space-y-[2px]">
+                  {[['나', r.me, 'bg-series-me'], ['평균', r.avg, 'bg-series-avg']].map(([who, v, color]) => (
+                    <div key={who} className="flex items-center gap-2">
+                      <div className="h-2.5 flex-1">
+                        <div className={`bar-grow h-full rounded-r-[4px] ${color}`} style={{ width: `${((v || 0) / max) * 100}%`, minWidth: v ? 2 : 0 }} />
+                      </div>
+                      <span className="tabular w-16 shrink-0 text-right text-xs text-stone-600">
+                        <span className="sr-only">{who} </span>{v === null ? '-' : formatManwon(v)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <span className="tabular col-span-2 -mt-1 whitespace-nowrap text-right text-xs text-stone-500 sm:col-span-1 sm:mt-0">
+                  {diff === null ? '' : `평균 대비 ${formatSigned(diff)}`}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      );
+    }
+
+    // 상위 X% 게이지: 왼쪽 하위 → 오른쪽 상위
+    function PercentileMeter({ label, topPercent, caption, enough }) {
+      const pos = topPercent === null ? 0 : Math.min(100, Math.max(0, 100 - topPercent));
+      return (
+        <div className="rounded-2xl border border-stone-200 bg-surface p-4 sm:p-5">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-sm font-medium text-stone-600">{label}</p>
+            {!enough && <Badge tone="warning">표본 부족</Badge>}
+          </div>
+          <p className="tabular mt-1 text-3xl font-extrabold tracking-tight text-stone-900">
+            {topPercent === null ? '-' : <>상위 {topPercent.toLocaleString('ko-KR')}<span className="text-xl">%</span></>}
+          </p>
+          <div className="relative mt-4 h-2 rounded-full bg-stone-200" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pos} aria-label={`${label} 상위 ${topPercent}%`}>
+            <div className="bar-grow absolute inset-y-0 left-0 rounded-full bg-series-avg/30" style={{ width: `${pos}%` }} />
+            <div
+              className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-series-me shadow transition-[left] duration-500"
+              style={{ left: `${pos}%` }}
+            />
+          </div>
+          <div className="mt-1.5 flex justify-between text-[11px] text-stone-400"><span>하위</span><span>상위</span></div>
+          {caption && <p className="mt-2 text-xs text-stone-500">{caption}</p>}
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🔀 Router Components
+    // ========================================
+    const RouterContext = createContext(null);
+
+    const getHashPath = () => window.location.hash.replace(/^#/, '') || '/';
+
+    function Router({ children }) {
+      const [path, setPath] = useState(getHashPath);
+      useEffect(() => {
+        const onChange = () => { setPath(getHashPath()); window.scrollTo(0, 0); };
+        window.addEventListener('hashchange', onChange);
+        return () => window.removeEventListener('hashchange', onChange);
+      }, []);
+      const navigate = useCallback((to) => { window.location.hash = to; }, []);
+      return <RouterContext.Provider value={{ path, navigate }}>{children}</RouterContext.Provider>;
+    }
+
+    const useRouter = () => useContext(RouterContext);
+    const matchRoute = (pattern, path) => pattern === '*' || pattern === path.split('?')[0];
+
+    function Routes({ children }) {
+      const { path } = useRouter();
+      const routes = React.Children.toArray(children);
+      const hit = routes.find((r) => matchRoute(r.props.path, path));
+      return hit ? hit.props.element : null;
+    }
+
+    function Route() { return null; }
+
+    function Link({ to, className = '', children, ...rest }) {
+      return <a href={`#${to}`} className={className} {...rest}>{children}</a>;
+    }
+
+    // ========================================
+    // 🧠 App State (meta · 내 기록)
+    // ========================================
+    const AppContext = createContext(null);
+    const useApp = () => useContext(AppContext);
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header() {
+      const { path } = useRouter();
+      const { myRecord } = useApp();
+      const nav = [
+        { to: '/', label: '전체 통계' },
+        { to: '/result', label: '내 위치' },
+      ];
+      return (
+        <header className="sticky top-0 z-40 border-b border-stone-200 bg-stone-100/90 backdrop-blur">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
+            <Link to="/" className="flex items-center gap-2 font-extrabold tracking-tight">
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-stone-900 text-sm text-white" aria-hidden="true">₩</span>
+              <span className="hidden sm:inline">월급비교소</span>
+            </Link>
+            <nav className="flex items-center gap-1" aria-label="주요 메뉴">
+              {nav.map((n) => (
+                <Link
+                  key={n.to}
+                  to={n.to}
+                  aria-current={path === n.to ? 'page' : undefined}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium ${path === n.to ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'}`}
+                >
+                  {n.label}
+                </Link>
+              ))}
+              <Link to="/submit" className="ml-1 rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-700">
+                {myRecord ? '다시 입력' : '익명 입력'}
+              </Link>
+            </nav>
+          </div>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="mx-auto max-w-5xl px-4 pb-10 pt-6 text-xs leading-relaxed text-stone-500">
+          🔒 입력값(직군·연차·월급·지출)만 저장하며 이름·이메일·IP 등 개인을 식별할 수 있는 정보는 수집하지 않습니다.
+          모든 금액은 <b>세후 월 실수령액</b> 기준입니다.
+        </footer>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+
+    // ── 전체 통계 ────────────────────────────────
+    function StatsPage() {
+      const { meta, myRecord } = useApp();
+      const [jobGroup, setJobGroup] = useState('');
+      const [careerBand, setCareerBand] = useState('');
+      const query = new URLSearchParams({ jobGroup, careerBand }).toString();
+      const { data, loading, error, reload } = useFetch(`/stats?${query}`);
+
+      const bandOptions = meta.careerBands.map((b) => ({ value: b.key, label: b.label }));
+      const jobOptions = meta.jobGroups.map((j) => ({ value: j, label: j }));
+
+      return (
+        <div className="space-y-5">
+          <section className="pt-2">
+            <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">다들 얼마 벌고, 얼마 쓸까?</h1>
+            <p className="mt-1 text-stone-600">익명으로 모인 월 실수령액과 생활비 통계예요. 내 값을 넣으면 상위 몇 %인지 알려드려요.</p>
+            {!myRecord && (
+              <Link to="/submit" className="mt-4 inline-flex rounded-lg bg-stone-900 px-5 py-3 text-sm font-semibold text-white hover:bg-stone-700">
+                30초 만에 익명으로 비교하기 →
+              </Link>
+            )}
+          </section>
+
+          {/* 필터: 차트 위 한 줄 */}
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Select id="f-job" label="직군" value={jobGroup} onChange={(e) => setJobGroup(e.target.value)} options={jobOptions} placeholder="전체 직군" className="sm:w-56" />
+            <Select id="f-band" label="연차" value={careerBand} onChange={(e) => setCareerBand(e.target.value)} options={bandOptions} placeholder="전체 연차" className="sm:w-56" />
+          </div>
+
+          {loading && !data ? <Spinner /> : error ? <ErrorState error={error} onRetry={reload} /> : data && (
+            data.count === 0 ? (
+              <Card>
+                <EmptyState
+                  icon="🌱"
+                  title={jobGroup || careerBand ? '이 조건의 데이터가 아직 없어요' : '아직 등록된 데이터가 없어요'}
+                  description="첫 번째 참여자가 되어 통계를 시작해 주세요."
+                  action={<Link to="/submit" className="rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white">익명으로 입력하기</Link>}
+                />
+              </Card>
+            ) : (
+              <div className={`space-y-5 ${loading ? 'opacity-60' : ''} transition-opacity`}>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <StatTile label="참여자" value={`${data.count.toLocaleString('ko-KR')}명`} sub={data.count < meta.minSample ? '표본이 적어 참고용이에요' : '익명 응답 수'} />
+                  <StatTile label="평균 월급" value={formatManwon(data.avgSalary, 0)} sub={`중앙값 ${formatManwon(data.medianSalary, 0)}`} />
+                  <StatTile label="평균 월 지출" value={formatManwon(data.avgExpense, 0)} sub={`중앙값 ${formatManwon(data.medianExpense, 0)}`} />
+                  <StatTile label="평균 저축률" value={formatPercent(data.avgSavingsRate)} sub="저축·적금 ÷ 월급" />
+                </div>
+
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <Card>
+                    <CardTitle title="월급 분포" subtitle="50만원 구간별 인원" />
+                    <Histogram buckets={data.salaryHistogram} highlight={null} ariaLabel="월급 분포 히스토그램" />
+                  </Card>
+                  <Card>
+                    <CardTitle title="월 지출 분포" subtitle="저축·적금 포함 총지출" />
+                    <Histogram buckets={data.expenseHistogram} highlight={null} ariaLabel="월 지출 분포 히스토그램" />
+                  </Card>
+                </div>
+
+                <Card>
+                  <CardTitle title="카테고리별 평균 지출" subtitle="많이 쓰는 순" />
+                  <HBarList
+                    rows={meta.categories
+                      .map((c) => ({ key: c.key, label: c.label, value: data.categoryAvg[c.key] }))
+                      .sort((a, b) => (b.value || 0) - (a.value || 0))}
+                  />
+                </Card>
+
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <Card>
+                    <CardTitle title="직군별 평균 월급" subtitle={careerBand ? `${bandOptions.find((b) => b.value === careerBand)?.label} 기준` : '전체 연차 기준'} />
+                    {data.byJobGroup.length === 0 ? <EmptyState title="데이터 없음" /> : (
+                      <HBarList
+                        highlightKey={jobGroup}
+                        rows={data.byJobGroup.map((r) => ({ key: r.jobGroup, label: r.jobGroup, meta: `${r.count}명`, value: r.avgSalary }))}
+                      />
+                    )}
+                  </Card>
+                  <Card>
+                    <CardTitle title="연차별 평균 월급" subtitle={jobGroup ? `${jobGroup} 기준` : '전체 직군 기준'} />
+                    <HBarList
+                      highlightKey={careerBand}
+                      rows={data.byCareerBand.map((r) => ({ key: r.careerBand, label: r.label, meta: `${r.count}명`, value: r.avgSalary }))}
+                    />
+                  </Card>
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      );
+    }
+
+    // ── 익명 입력 ────────────────────────────────
+    function SubmitPage() {
+      const { meta, myRecord, setMyRecord, setComparison } = useApp();
+      const { navigate } = useRouter();
+
+      // 이전 입력이 있으면 만원 단위 문자열로 복원
+      const initial = useMemo(() => {
+        const toMan = (won) => (won ? String(won / 10000) : '');
+        return {
+          jobGroup: myRecord?.jobGroup || '',
+          years: myRecord ? String(myRecord.years) : '',
+          salary: toMan(myRecord?.monthlySalary),
+          expenses: Object.fromEntries(meta.categories.map((c) => [c.key, toMan(myRecord?.expenses?.[c.key])])),
+        };
+      }, []);
+
+      const [form, setForm] = useState(initial);
+      const [errors, setErrors] = useState({});
+      const [submitting, setSubmitting] = useState(false);
+      const [serverError, setServerError] = useState('');
+
+      const salaryWon = manwonToWon(form.salary);
+      const expenseWon = Object.fromEntries(meta.categories.map((c) => [c.key, manwonToWon(form.expenses[c.key])]));
+      const totalWon = Object.values(expenseWon).reduce((a, b) => a + b, 0);
+      const balance = salaryWon - totalWon;
+
+      // 값을 고치면 그 필드의 에러는 바로 지운다 (재검증은 제출 시)
+      const clearError = (...keys) => setErrors((e) => {
+        if (!keys.some((k) => e[k])) return e;
+        const next = { ...e };
+        keys.forEach((k) => delete next[k]);
+        return next;
+      });
+      const setField = (key, value) => { setForm((f) => ({ ...f, [key]: value })); clearError(key); };
+      const setExpense = (key, value) => {
+        setForm((f) => ({ ...f, expenses: { ...f.expenses, [key]: sanitizeDecimal(value) } }));
+        clearError(`exp_${key}`, 'expenses');
+      };
+
+      function validate() {
+        const e = {};
+        if (!form.jobGroup) e.jobGroup = '직군을 선택해 주세요.';
+        const y = Number(form.years);
+        if (form.years === '' || !Number.isInteger(y) || y < 0 || y > 50) e.years = '0~50 사이 정수로 입력해 주세요.';
+        if (!form.salary || salaryWon < 100000 || salaryWon > 100000000) e.salary = '10만원 이상 1억원 이하로 입력해 주세요.';
+        meta.categories.forEach((c) => {
+          if (expenseWon[c.key] > 100000000) e[`exp_${c.key}`] = '1억원 이하로 입력해 주세요.';
+        });
+        if (totalWon === 0) e.expenses = '지출 항목을 하나 이상 입력해 주세요.';
+        setErrors(e);
+        return Object.keys(e).length === 0;
+      }
+
+      async function handleSubmit(ev) {
+        ev.preventDefault();
+        setServerError('');
+        if (!validate()) return;
+        const payload = { jobGroup: form.jobGroup, years: Number(form.years), monthlySalary: salaryWon, expenses: expenseWon };
+        setSubmitting(true);
+        try {
+          const comparison = await apiRequest('/reports', { method: 'POST', body: JSON.stringify(payload) });
+          const record = { ...payload, savedAt: new Date().toISOString() };
+          storage.save(record);
+          setMyRecord(record);
+          setComparison(comparison);
+          navigate('/result');
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      }
+
+      return (
+        <form onSubmit={handleSubmit} noValidate className="grid gap-5 lg:grid-cols-[1fr_18rem]">
+          <div className="space-y-5">
+            <section className="pt-2">
+              <h1 className="text-2xl font-extrabold tracking-tight">익명으로 입력하기</h1>
+              <p className="mt-1 text-sm text-stone-600">모든 금액은 <b>만원 단위</b>, 세후 <b>월 실수령액</b> 기준으로 적어주세요. 소수점 한 자리까지 가능해요 (예: 12.5).</p>
+            </section>
+
+            {myRecord && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                이전에 입력한 값을 불러왔어요. 다시 제출하면 <b>새 응답으로 한 건 더</b> 저장돼요 (익명이라 기존 응답을 수정할 수 없어요).
+              </div>
+            )}
+
+            <Card>
+              <CardTitle title="기본 정보" />
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Select id="jobGroup" label="직군" value={form.jobGroup} onChange={(e) => setField('jobGroup', e.target.value)}
+                  options={meta.jobGroups.map((j) => ({ value: j, label: j }))} placeholder="선택하세요" error={errors.jobGroup} />
+                <Input id="years" label="연차" hint="1년 미만은 0" inputMode="numeric" value={form.years} suffix="년차"
+                  onChange={(e) => setField('years', e.target.value.replace(/\D/g, '').slice(0, 2))} placeholder="3" error={errors.years} />
+                <Input id="salary" label="월급 (세후 실수령)" inputMode="decimal" value={form.salary} suffix="만원"
+                  onChange={(e) => setField('salary', sanitizeDecimal(e.target.value))} placeholder="300" error={errors.salary} />
+              </div>
+            </Card>
+
+            <Card>
+              <CardTitle title="월 지출" subtitle="해당 없는 항목은 비워두세요" />
+              {errors.expenses && <p className="-mt-2 mb-3 text-sm text-red-600">{errors.expenses}</p>}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {meta.categories.map((c) => (
+                  <Input key={c.key} id={`exp-${c.key}`} label={c.label} hint={c.hint} inputMode="decimal" suffix="만원"
+                    value={form.expenses[c.key]} onChange={(e) => setExpense(c.key, e.target.value)} placeholder="0"
+                    error={errors[`exp_${c.key}`]} />
+                ))}
+              </div>
+            </Card>
+          </div>
+
+          {/* 요약 (데스크톱에서 고정) */}
+          <aside className="lg:pt-[4.5rem]">
+            <div className="space-y-3 lg:sticky lg:top-20">
+              <Card className="!p-5">
+                <h2 className="text-sm font-bold text-stone-700">한 달 요약</h2>
+                <dl className="tabular mt-3 space-y-2 text-sm">
+                  <div className="flex justify-between"><dt className="text-stone-500">월급</dt><dd className="font-semibold">{formatManwon(salaryWon)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-stone-500">총지출</dt><dd className="font-semibold">{formatManwon(totalWon)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-stone-500">└ 저축·적금</dt><dd>{formatManwon(expenseWon.savings)}</dd></div>
+                  <div className="flex justify-between border-t border-stone-200 pt-2"><dt className="text-stone-500">남는 돈</dt>
+                    <dd className={`font-bold ${balance < 0 ? 'text-red-600' : ''}`}>{balance < 0 ? '−' : ''}{formatManwon(Math.abs(balance))}</dd></div>
+                  <div className="flex justify-between"><dt className="text-stone-500">저축률</dt><dd>{salaryWon > 0 ? formatPercent(expenseWon.savings / salaryWon) : '-'}</dd></div>
+                </dl>
+                {balance < 0 && salaryWon > 0 && <p className="mt-2 text-xs text-stone-500">지출이 월급보다 많아요. 금액을 한 번 더 확인해 주세요.</p>}
+              </Card>
+              {serverError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{serverError}</p>}
+              <Button type="submit" size="lg" className="w-full" disabled={submitting}>
+                {submitting ? <><span className="spinner h-4 w-4 rounded-full border-2 border-white/40 border-t-white" />저장 중…</> : '익명 저장하고 내 위치 보기'}
+              </Button>
+              <p className="text-center text-xs text-stone-500">🔒 식별 정보 없이 입력값만 저장돼요</p>
+            </div>
+          </aside>
+        </form>
+      );
+    }
+
+    // ── 내 위치 ─────────────────────────────────
+    function ResultPage() {
+      const { meta, myRecord, setMyRecord, comparison, setComparison } = useApp();
+      const { navigate } = useRouter();
+      const [scopeKey, setScopeKey] = useState('all');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [confirmOpen, setConfirmOpen] = useState(false);
+
+      // 새로고침 등으로 비교 결과가 없으면 저장해 둔 내 값으로 다시 비교 (재저장 X)
+      const fetchComparison = useCallback(() => {
+        if (!myRecord) return;
+        setLoading(true);
+        setError(null);
+        const { savedAt, ...payload } = myRecord;
+        apiRequest('/compare', { method: 'POST', body: JSON.stringify({ ...payload, alreadySaved: true }) })
+          .then(setComparison)
+          .catch(setError)
+          .finally(() => setLoading(false));
+      }, [myRecord]);
+
+      useEffect(() => { if (myRecord && !comparison) fetchComparison(); }, []);
+
+      const scope = comparison?.scopes.find((s) => s.key === scopeKey);
+      const statsQuery = !scope ? null
+        : scope.key === 'all' ? '/stats'
+        : scope.key === 'job' ? `/stats?jobGroup=${encodeURIComponent(comparison.me.jobGroup)}`
+        : `/stats?jobGroup=${encodeURIComponent(comparison.me.jobGroup)}&careerBand=${encodeURIComponent(comparison.me.careerBand)}`;
+      const dist = useFetch(statsQuery);
+
+      if (!myRecord) {
+        return (
+          <Card className="mt-2">
+            <EmptyState icon="🧭" title="아직 입력한 값이 없어요"
+              description="월급과 지출을 익명으로 입력하면 전체·같은 직군·같은 연차 안에서 내 위치를 보여드려요."
+              action={<Button onClick={() => navigate('/submit')}>익명으로 입력하기</Button>} />
+          </Card>
+        );
+      }
+      if (error) return <Card className="mt-2"><ErrorState error={error} onRetry={fetchComparison} /></Card>;
+      if (loading || !comparison || !scope) return <Spinner label="내 위치를 계산하는 중…" />;
+
+      const { me } = comparison;
+      const bucketOf = (won) => Math.min(meta.bucketCount, Math.floor(won / meta.bucketSize));
+      const bandLabel = meta.careerBands.find((b) => b.key === me.careerBand)?.label;
+      const sampleNote = scope.enough ? `${scope.label} ${scope.count.toLocaleString('ko-KR')}명 중` : `${scope.label} 응답이 ${scope.count}명뿐이라 참고용이에요`;
+
+      return (
+        <div className="fade-up space-y-5">
+          <section className="flex flex-wrap items-end justify-between gap-3 pt-2">
+            <div>
+              <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">내 위치</h1>
+              <p className="mt-1 text-sm text-stone-600">{me.jobGroup} · {bandLabel} · 월급 {formatManwon(me.monthlySalary)} · 지출 {formatManwon(me.totalExpense)}</p>
+            </div>
+            <Tabs label="비교 범위" value={scopeKey} onChange={setScopeKey}
+              tabs={comparison.scopes.map((s) => ({ value: s.key, label: s.key === 'all' ? '전체' : s.key === 'job' ? '같은 직군' : '같은 직군·연차' }))} />
+          </section>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <PercentileMeter label="월급" topPercent={scope.salaryTopPercent} enough={scope.enough} caption={sampleNote} />
+            <PercentileMeter label="지출 규모 (많이 쓰는 순)" topPercent={scope.expenseTopPercent} enough={scope.enough} caption={sampleNote} />
+            <PercentileMeter label="저축률" topPercent={scope.savingsRateTopPercent} enough={scope.enough} caption={sampleNote} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <StatTile label={`월급 · ${scope.label} 평균 ${formatManwon(scope.avgSalary, 0)}`} value={formatManwon(me.monthlySalary)} sub={scope.avgSalary === null ? '비교 데이터 없음' : `평균 대비 ${formatSigned(me.monthlySalary - scope.avgSalary)}`} />
+            <StatTile label={`총지출 · ${scope.label} 평균 ${formatManwon(scope.avgExpense, 0)}`} value={formatManwon(me.totalExpense)} sub={scope.avgExpense === null ? '비교 데이터 없음' : `평균 대비 ${formatSigned(me.totalExpense - scope.avgExpense)}`} />
+            <StatTile label={`저축률 · ${scope.label} 평균 ${formatPercent(scope.avgSavingsRate)}`} value={formatPercent(me.savingsRate)}
+              sub={scope.avgSavingsRate === null ? '비교 데이터 없음' : `평균 대비 ${((me.savingsRate - scope.avgSavingsRate) * 100 >= 0 ? '+' : '−')}${Math.abs((me.savingsRate - scope.avgSavingsRate) * 100).toFixed(1)}%p`} />
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            {[
+              ['월급 분포에서 내 구간', 'salaryHistogram', me.monthlySalary],
+              ['지출 분포에서 내 구간', 'expenseHistogram', me.totalExpense],
+            ].map(([title, key, won]) => (
+              <Card key={key}>
+                <CardTitle title={title} subtitle={scope.label} right={<Legend items={[{ label: '내 구간', color: '#eb6834' }, { label: '참여자', color: '#2a78d6' }]} />} />
+                {dist.loading && !dist.data ? <Spinner /> : dist.error ? <ErrorState error={dist.error} onRetry={dist.reload} /> : dist.data && (
+                  <Histogram buckets={dist.data[key]} highlight={bucketOf(won)} ariaLabel={title} />
+                )}
+              </Card>
+            ))}
+          </div>
+
+          <Card>
+            <CardTitle title="카테고리별 지출 비교" subtitle={`${scope.label} 평균과 비교 · 나와 평균 모두 0원인 항목은 생략`}
+              right={<Legend items={[{ label: '나', color: '#eb6834' }, { label: `${scope.label} 평균`, color: '#2a78d6' }]} />} />
+            <PairedBars rows={meta.categories
+              .map((c) => ({ key: c.key, label: c.label, hint: c.hint, me: me.expenses[c.key], avg: scope.categoryAvg[c.key] }))
+              .filter((r) => r.me > 0 || r.avg >= 500)} />
+          </Card>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" onClick={() => setConfirmOpen(true)}>이 기기에서 내 기록 지우기</Button>
+            <Button variant="secondary" onClick={fetchComparison}>최신 통계로 새로고침</Button>
+            <Button onClick={() => navigate('/submit')}>값 바꿔서 다시 입력</Button>
+          </div>
+
+          <Modal isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} title="이 기기의 내 기록을 지울까요?" size="sm">
+            <p className="text-sm text-stone-600">
+              이 브라우저에 보관된 입력값만 지워져요. 서버에 저장된 응답은 누구의 것인지 알 수 없도록 익명으로 저장되어 개별 삭제가 불가능해요.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmOpen(false)}>취소</Button>
+              <Button variant="danger" onClick={() => { storage.clear(); setMyRecord(null); setComparison(null); setConfirmOpen(false); navigate('/'); }}>지우기</Button>
+            </div>
+          </Modal>
+        </div>
+      );
+    }
+
+    function NotFoundPage() {
+      return (
+        <Card className="mt-2">
+          <EmptyState icon="🔎" title="페이지를 찾을 수 없어요" action={<Link to="/" className="rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white">통계로 가기</Link>} />
+        </Card>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      const { data: meta, loading, error, reload } = useFetch('/meta');
+      const [myRecord, setMyRecord] = useState(() => storage.load());
+      const [comparison, setComparison] = useState(null);
+
+      const ctx = useMemo(() => ({ meta, myRecord, setMyRecord, comparison, setComparison }), [meta, myRecord, comparison]);
+
+      return (
+        <Router>
+          <AppContext.Provider value={ctx}>
+            <Header />
+            <main className="mx-auto max-w-5xl px-4 py-5">
+              {loading ? <Spinner /> : error ? <ErrorState error={error} onRetry={reload} /> : (
+                <Routes>
+                  <Route path="/" element={<StatsPage />} />
+                  <Route path="/submit" element={<SubmitPage />} />
+                  <Route path="/result" element={<ResultPage />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              )}
+            </main>
+            <Footer />
+          </AppContext.Provider>
+        </Router>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

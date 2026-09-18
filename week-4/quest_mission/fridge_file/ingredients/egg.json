@@ -1,0 +1,15 @@
+{
+  "id": "egg",
+  "name": "달걀",
+  "category": "단백질",
+  "quantity": 8,
+  "unit": "개",
+  "storage": "냉장",
+  "purchasedOn": "2026-09-08",
+  "expiresOn": "2026-10-02",
+  "tags": [
+    "주재료",
+    "만능"
+  ],
+  "note": "특란. 프라이·찜·부침 다 가능"
+}

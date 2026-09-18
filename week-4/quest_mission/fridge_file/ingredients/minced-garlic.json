@@ -1,0 +1,15 @@
+{
+  "id": "minced-garlic",
+  "name": "다진마늘",
+  "category": "양념",
+  "quantity": 120,
+  "unit": "g",
+  "storage": "냉장",
+  "purchasedOn": "2026-09-01",
+  "expiresOn": "2026-10-05",
+  "tags": [
+    "양념",
+    "만능"
+  ],
+  "note": "냉장 보관 중"
+}

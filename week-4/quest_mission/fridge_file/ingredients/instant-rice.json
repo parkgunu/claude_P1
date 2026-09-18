@@ -1,0 +1,14 @@
+{
+  "id": "instant-rice",
+  "name": "즉석밥",
+  "category": "곡물",
+  "quantity": 3,
+  "unit": "개",
+  "storage": "실온",
+  "purchasedOn": "2026-07-15",
+  "expiresOn": "2027-01-20",
+  "tags": [
+    "주식"
+  ],
+  "note": ""
+}

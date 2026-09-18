@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>속닥속닥 · 익명 게시판</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 이 깨진다) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes pop {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.35); }
+      100% { transform: scale(1); }
+    }
+    .animate-pop { animation: pop 0.35s ease-out; }
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in { animation: fade-in 0.3s ease-out both; }
+  </style>
+</head>
+<body class="bg-stone-50 text-stone-800 antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+    // ========================================
+    // ⚙️ Config & Helpers
+    // ========================================
+    const API_BASE_URL = '/api';
+    const CONTENT_MAX = 500;
+
+    const CATEGORIES = [
+      { value: '고민', emoji: '🌧️', chip: 'bg-slate-100 text-slate-700 ring-slate-200', active: 'bg-slate-700 text-white ring-slate-700' },
+      { value: '칭찬', emoji: '🌷', chip: 'bg-rose-50 text-rose-700 ring-rose-200', active: 'bg-rose-500 text-white ring-rose-500' },
+      { value: '응원', emoji: '🔥', chip: 'bg-amber-50 text-amber-700 ring-amber-200', active: 'bg-amber-500 text-white ring-amber-500' },
+      { value: '관심사', emoji: '🔭', chip: 'bg-sky-50 text-sky-700 ring-sky-200', active: 'bg-sky-600 text-white ring-sky-600' },
+      { value: '기타', emoji: '💬', chip: 'bg-violet-50 text-violet-700 ring-violet-200', active: 'bg-violet-600 text-white ring-violet-600' },
+    ];
+    const CATEGORY_BY_VALUE = Object.fromEntries(CATEGORIES.map((c) => [c.value, c]));
+
+    // 익명이지만 "한 브라우저 = 한 번 공감"을 위해 무작위 id 를 로컬에 보관한다
+    function getVoterId() {
+      const KEY = 'anon-board-voter-id';
+      const make = () =>
+        (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
+      try {
+        let id = localStorage.getItem(KEY);
+        if (!id) {
+          id = make();
+          localStorage.setItem(KEY, id);
+        }
+        return id;
+      } catch (_err) {
+        return make();
+      }
+    }
+
+    async function api(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (_err) {
+        // JSON 이 아닌 응답
+      }
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.message || '요청을 처리하지 못했습니다.');
+      }
+      return body.data;
+    }
+
+    function timeAgo(iso) {
+      const diff = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+      if (diff < 60) return '방금 전';
+      if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+      if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}일 전`;
+      return new Date(iso).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, className = '', children, ...props }) {
+      const variants = {
+        primary: 'bg-stone-900 text-white hover:bg-stone-700 focus-visible:ring-stone-900',
+        secondary: 'bg-white text-stone-700 ring-1 ring-inset ring-stone-300 hover:bg-stone-100 focus-visible:ring-stone-400',
+        danger: 'bg-red-600 text-white hover:bg-red-500 focus-visible:ring-red-600',
+        ghost: 'text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-300',
+      };
+      const sizes = {
+        sm: 'px-3 py-1.5 text-sm',
+        md: 'px-4 py-2 text-sm',
+        lg: 'px-5 py-2.5 text-base',
+      };
+      return (
+        <button
+          disabled={disabled}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 ${variants[variant]} ${sizes[size]} ${className}`}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Textarea({ label, value, onChange, placeholder, error, disabled = false, maxLength, className = '', ...props }) {
+      const id = useMemo(() => `ta-${Math.random().toString(36).slice(2, 8)}`, []);
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="sr-only">{label}</label>}
+          <textarea
+            id={id}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            maxLength={maxLength}
+            aria-invalid={!!error}
+            className="block w-full resize-none rounded-xl border-0 bg-stone-50 px-4 py-3 text-[15px] leading-relaxed text-stone-800 placeholder:text-stone-400 ring-1 ring-inset ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-800 disabled:opacity-60"
+            {...props}
+          />
+          {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children, ...props }) {
+      return (
+        <div className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200/70 ${className}`} {...props}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ className = '', children }) {
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Chip({ selected = false, activeClass = 'bg-stone-900 text-white ring-stone-900', idleClass = 'bg-white text-stone-600 ring-stone-200', className = '', children, ...props }) {
+      return (
+        <button
+          type="button"
+          aria-pressed={selected}
+          className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium ring-1 ring-inset transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-800 ${selected ? activeClass : idleClass} ${className}`}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function SegmentedControl({ options, value, onChange, label }) {
+      return (
+        <div role="radiogroup" aria-label={label} className="inline-flex rounded-full bg-stone-200/70 p-1">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={value === opt.value}
+              onClick={() => onChange(opt.value)}
+              className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-800 ${value === opt.value ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return (
+        <span
+          role="status"
+          aria-label="불러오는 중"
+          className={`inline-block h-5 w-5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800 ${className}`}
+        />
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header() {
+      return (
+        <header className="pt-10 pb-6 text-center sm:pt-14">
+          <p className="text-3xl" aria-hidden="true">🤫</p>
+          <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-stone-900 sm:text-4xl">속닥속닥</h1>
+          <p className="mt-2 text-sm text-stone-500 sm:text-base">
+            이름 없이 털어놓고, 누군가의 이야기에 조용히 공감해 주세요.
+          </p>
+        </header>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="py-10 text-center text-xs text-stone-400">
+          모든 글은 익명으로 저장됩니다 · 서로에게 따뜻한 말을 남겨 주세요
+        </footer>
+      );
+    }
+
+    function HeartIcon({ filled }) {
+      return (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.5s-7.5-4.6-9.3-9.6C1.6 7.6 3.9 4.5 7.2 4.5c2 0 3.6 1.1 4.8 2.8 1.2-1.7 2.8-2.8 4.8-2.8 3.3 0 5.6 3.1 4.5 6.4-1.8 5-9.3 9.6-9.3 9.6z" />
+        </svg>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function ComposeForm({ onCreated }) {
+      const [category, setCategory] = useState('');
+      const [content, setContent] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+      const [error, setError] = useState('');
+
+      const trimmed = content.trim();
+      const canSubmit = !!category && !!trimmed && !submitting;
+
+      const submit = async (e) => {
+        e?.preventDefault();
+        if (!category) return setError('카테고리를 선택해 주세요.');
+        if (!trimmed) return setError('내용을 입력해 주세요.');
+        setSubmitting(true);
+        setError('');
+        try {
+          const post = await api('/posts', {
+            method: 'POST',
+            body: JSON.stringify({ category, content: trimmed }),
+          });
+          setContent('');
+          setCategory('');
+          onCreated(post);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <Card className="p-4 sm:p-5">
+          <form onSubmit={submit}>
+            <fieldset>
+              <legend className="mb-3 text-sm font-semibold text-stone-700">어떤 이야기인가요?</legend>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map((c) => (
+                  <Chip
+                    key={c.value}
+                    selected={category === c.value}
+                    activeClass={c.active}
+                    idleClass={c.chip}
+                    onClick={() => { setCategory(c.value); setError(''); }}
+                  >
+                    <span aria-hidden="true">{c.emoji}</span>{c.value}
+                  </Chip>
+                ))}
+              </div>
+            </fieldset>
+
+            <Textarea
+              label="내용"
+              className="mt-4"
+              rows={4}
+              value={content}
+              maxLength={CONTENT_MAX}
+              onChange={(e) => { setContent(e.target.value); setError(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(e); }}
+              placeholder="아무도 모르게 하고 싶은 이야기를 적어 보세요."
+              disabled={submitting}
+              error={error}
+            />
+
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className={`text-xs tabular-nums ${content.length >= CONTENT_MAX ? 'text-red-500' : 'text-stone-400'}`}>
+                {content.length} / {CONTENT_MAX}
+                <span className="ml-2 hidden sm:inline">· Ctrl+Enter 로 등록</span>
+              </span>
+              <Button type="submit" disabled={!canSubmit}>
+                {submitting ? <Spinner className="h-4 w-4 border-stone-500 border-t-white" /> : '익명으로 올리기'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      );
+    }
+
+    function PostCard({ post, onLike, isNew }) {
+      const meta = CATEGORY_BY_VALUE[post.category] || CATEGORY_BY_VALUE['기타'];
+      const [popping, setPopping] = useState(false);
+
+      const handleLike = () => {
+        if (post.liked) return;
+        setPopping(true);
+        onLike(post.id);
+      };
+
+      return (
+        <Card className={`animate-fade-in ${isNew ? 'ring-2 ring-stone-800' : ''}`}>
+          <article>
+            <div className="flex items-center justify-between gap-2">
+              <Badge className={meta.chip}>
+                <span aria-hidden="true">{meta.emoji}</span>{post.category}
+              </Badge>
+              <time dateTime={post.createdAt} className="text-xs text-stone-400" title={new Date(post.createdAt).toLocaleString('ko-KR')}>
+                {timeAgo(post.createdAt)}
+              </time>
+            </div>
+
+            <p className="mt-3 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-stone-800">
+              {post.content}
+            </p>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={handleLike}
+                disabled={post.liked}
+                aria-pressed={post.liked}
+                aria-label={post.liked ? `공감함, 공감 ${post.likes}개` : `공감하기, 현재 ${post.likes}개`}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ring-1 ring-inset transition focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${post.liked ? 'cursor-default bg-rose-50 text-rose-600 ring-rose-200' : 'bg-white text-stone-500 ring-stone-200 hover:bg-rose-50 hover:text-rose-600 hover:ring-rose-200'}`}
+              >
+                <span className={popping ? 'animate-pop' : ''} onAnimationEnd={() => setPopping(false)}>
+                  <HeartIcon filled={post.liked} />
+                </span>
+                <span>공감</span>
+                <span className="tabular-nums">{post.likes}</span>
+              </button>
+            </div>
+          </article>
+        </Card>
+      );
+    }
+
+    function BoardPage() {
+      const voterId = useMemo(getVoterId, []);
+      const [sort, setSort] = useState('latest');
+      const [filter, setFilter] = useState('');
+      const [posts, setPosts] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+      const [notice, setNotice] = useState('');
+      const [newId, setNewId] = useState(null);
+      const requestRef = useRef(0);
+
+      const load = useCallback(async () => {
+        const reqId = ++requestRef.current;
+        setLoading(true);
+        setError('');
+        try {
+          const params = new URLSearchParams({ sort, voterId });
+          if (filter) params.set('category', filter);
+          const data = await api(`/posts?${params}`);
+          if (reqId === requestRef.current) setPosts(data);
+        } catch (err) {
+          if (reqId === requestRef.current) setError(err.message);
+        } finally {
+          if (reqId === requestRef.current) setLoading(false);
+        }
+      }, [sort, filter, voterId]);
+
+      useEffect(() => { load(); }, [load]);
+
+      useEffect(() => {
+        if (!newId) return;
+        const t = setTimeout(() => setNewId(null), 3000);
+        return () => clearTimeout(t);
+      }, [newId]);
+
+      useEffect(() => {
+        if (!notice) return;
+        const t = setTimeout(() => setNotice(''), 2500);
+        return () => clearTimeout(t);
+      }, [notice]);
+
+      const handleCreated = (post) => {
+        setNotice('익명으로 등록했어요.');
+        setNewId(post.id);
+        // 새 글이 바로 보이도록 최신순 · 전체 보기로 전환한다
+        if (sort !== 'latest' || filter) {
+          setSort('latest');
+          setFilter('');
+        } else {
+          setPosts((prev) => [post, ...prev]);
+        }
+      };
+
+      const handleLike = async (id) => {
+        // 낙관적 업데이트 후 서버 값으로 맞춘다
+        setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, liked: true, likes: p.likes + 1 } : p)));
+        try {
+          const updated = await api(`/posts/${id}/like`, {
+            method: 'POST',
+            body: JSON.stringify({ voterId }),
+          });
+          setPosts((prev) => prev.map((p) => (p.id === id ? updated : p)));
+        } catch (err) {
+          setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, liked: false, likes: Math.max(0, p.likes - 1) } : p)));
+          setNotice(err.message);
+        }
+      };
+
+      return (
+        <main className="mx-auto w-full max-w-2xl px-4 sm:px-6">
+          <Header />
+
+          <ComposeForm onCreated={handleCreated} />
+
+          <section aria-labelledby="list-title" className="mt-10">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="list-title" className="text-lg font-bold text-stone-900">
+                모두의 이야기 {!loading && !error && <span className="ml-1 text-sm font-medium text-stone-400">{posts.length}</span>}
+              </h2>
+              <div className="flex items-center gap-2">
+                <SegmentedControl
+                  label="정렬"
+                  value={sort}
+                  onChange={setSort}
+                  options={[{ value: 'latest', label: '최신순' }, { value: 'likes', label: '공감순' }]}
+                />
+                <Button variant="ghost" size="sm" onClick={load} disabled={loading} aria-label="새로고침" className="h-9 w-9 !px-0">
+                  <svg viewBox="0 0 24 24" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.1 15a7.5 7.5 0 0 0 13.4 2M18.9 9A7.5 7.5 0 0 0 5.5 7" />
+                  </svg>
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="카테고리 필터">
+              <Chip selected={filter === ''} onClick={() => setFilter('')}>전체</Chip>
+              {CATEGORIES.map((c) => (
+                <Chip key={c.value} selected={filter === c.value} activeClass={c.active} onClick={() => setFilter(c.value)}>
+                  <span aria-hidden="true">{c.emoji}</span>{c.value}
+                </Chip>
+              ))}
+            </div>
+
+            <div className="mt-5 space-y-3" aria-live="polite" aria-busy={loading}>
+              {loading && posts.length === 0 && (
+                <div className="flex justify-center py-16"><Spinner /></div>
+              )}
+
+              {error && (
+                <Card className="py-10 text-center">
+                  <p className="text-2xl" aria-hidden="true">😵</p>
+                  <p className="mt-2 font-semibold text-stone-800">글을 불러오지 못했어요</p>
+                  <p className="mt-1 text-sm text-stone-500">{error}</p>
+                  <Button variant="secondary" size="sm" className="mt-4" onClick={load}>다시 시도</Button>
+                </Card>
+              )}
+
+              {!loading && !error && posts.length === 0 && (
+                <Card className="py-14 text-center">
+                  <p className="text-3xl" aria-hidden="true">🍃</p>
+                  <p className="mt-3 font-semibold text-stone-800">
+                    {filter ? `아직 '${filter}' 이야기가 없어요` : '아직 올라온 이야기가 없어요'}
+                  </p>
+                  <p className="mt-1 text-sm text-stone-500">첫 번째 이야기를 남겨 보세요.</p>
+                </Card>
+              )}
+
+              {!error && posts.map((post) => (
+                <PostCard key={post.id} post={post} onLike={handleLike} isNew={post.id === newId} />
+              ))}
+            </div>
+          </section>
+
+          <Footer />
+
+          {notice && (
+            <div role="status" className="fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+              <div className="animate-fade-in rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white shadow-lg">
+                {notice}
+              </div>
+            </div>
+          )}
+        </main>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return <BoardPage />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

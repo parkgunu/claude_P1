@@ -1,0 +1,15 @@
+{
+  "id": "spam",
+  "name": "스팸",
+  "category": "가공육",
+  "quantity": 200,
+  "unit": "g",
+  "storage": "실온",
+  "purchasedOn": "2026-06-01",
+  "expiresOn": "2027-05-01",
+  "tags": [
+    "주재료",
+    "비상용"
+  ],
+  "note": "미개봉 캔"
+}

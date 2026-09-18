@@ -1,0 +1,15 @@
+{
+  "name": "about-me",
+  "version": "1.0.0",
+  "private": true,
+  "description": "자기소개 사이트(index.html, React CDN) + 문의하기 API(server.js, Express + Supabase Postgres)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "pg": "^8.13.1"
+  }
+}

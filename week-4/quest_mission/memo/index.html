@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f5f4">
+  <title>메모장</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN은 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 미지원) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+    @keyframes pop-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+    .animate-toast { animation: toast-in .18s ease-out; }
+    .animate-fade { animation: fade-in .15s ease-out; }
+    /* 모바일: 아래에서 올라오는 바텀시트 / 태블릿 이상: 가운데 팝업 */
+    .animate-sheet { animation: sheet-up .22s cubic-bezier(.2,.8,.2,1); }
+    @media (min-width: 640px) { .animate-sheet { animation: pop-in .16s ease-out; } }
+    .pb-safe { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+    .bottom-safe { bottom: max(1.25rem, env(safe-area-inset-bottom)); }
+    body { -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // ========================================
+    // React Hooks
+    // ========================================
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const API_BASE_URL = '/api';
+    const MAX_TITLE = 200;
+    const MAX_CONTENT = 10000;
+
+    // ========================================
+    // 🛠️ Utils & API
+    // ========================================
+    async function api(path, options = {}) {
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      let json = null;
+      try { json = await res.json(); } catch { /* 비 JSON 응답 */ }
+      if (!res.ok || !json || !json.success) {
+        throw new Error((json && json.message) || `요청 실패 (${res.status})`);
+      }
+      return json.data;
+    }
+
+    const formatDate = (iso) =>
+      new Date(iso).toLocaleString('ko-KR', {
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      });
+
+    function useDebounce(value, delay = 300) {
+      const [debounced, setDebounced] = useState(value);
+      useEffect(() => {
+        const t = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(t);
+      }, [value, delay]);
+      return debounced;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
+      const variants = {
+        primary: 'bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 focus-visible:ring-amber-400',
+        secondary: 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-50 active:bg-stone-100 focus-visible:ring-stone-300',
+        danger: 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700 focus-visible:ring-red-400',
+        ghost: 'text-stone-600 hover:bg-stone-200/70 active:bg-stone-200 focus-visible:ring-stone-300',
+      };
+      // 모바일 터치 타깃 최소 44px 를 확보한다
+      const sizes = { sm: 'min-h-[36px] px-3 text-sm', md: 'min-h-[44px] px-4 text-sm', lg: 'min-h-[48px] px-5 text-base' };
+      return (
+        <button
+          className={`inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition
+            focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:cursor-not-allowed
+            ${variants[variant]} ${sizes[size]} ${className}`}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    // iOS 에서 16px 미만 입력창은 포커스 시 화면이 확대되므로 text-base 를 쓴다
+    const fieldClass = 'w-full rounded-xl border bg-white px-3.5 py-2.5 text-base outline-none transition focus:ring-2 focus:ring-amber-300';
+
+    const Input = React.forwardRef(function Input({ error, className = '', ...props }, ref) {
+      return (
+        <input
+          ref={ref}
+          className={`${fieldClass} ${error ? 'border-red-400' : 'border-stone-300 focus:border-amber-400'} ${className}`}
+          {...props}
+        />
+      );
+    });
+
+    function Textarea({ className = '', ...props }) {
+      return (
+        <textarea
+          className={`${fieldClass} resize-none leading-relaxed border-stone-300 focus:border-amber-400 ${className}`}
+          {...props}
+        />
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return <div className={`rounded-2xl bg-white shadow-sm ring-1 ring-stone-200 ${className}`}>{children}</div>;
+    }
+
+    // 레이어 팝업: 모바일은 바텀시트, sm 이상은 가운데 정렬
+    function Modal({ isOpen, onClose, title, children, footer, size = 'md', zIndex = 'z-50' }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden'; // 뒤 배경 스크롤 잠금
+        window.addEventListener('keydown', onKey);
+        return () => {
+          window.removeEventListener('keydown', onKey);
+          document.body.style.overflow = prevOverflow;
+        };
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      const sizes = { sm: 'sm:max-w-sm', md: 'sm:max-w-lg', lg: 'sm:max-w-2xl' };
+      return (
+        <div
+          className={`animate-fade fixed inset-0 ${zIndex} flex items-end justify-center bg-black/40 sm:items-center sm:p-4`}
+          onClick={onClose}
+        >
+          <div
+            role="dialog" aria-modal="true" aria-labelledby="modal-title"
+            className={`animate-sheet flex max-h-[92dvh] w-full ${sizes[size]} flex-col rounded-t-3xl bg-white shadow-xl sm:rounded-2xl`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 모바일 바텀시트 손잡이 */}
+            <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden="true">
+              <span className="h-1.5 w-10 rounded-full bg-stone-300" />
+            </div>
+            <div className="flex items-center justify-between gap-2 px-5 pb-2 pt-3 sm:pt-5">
+              <h2 id="modal-title" className="text-lg font-semibold">{title}</h2>
+              <button
+                onClick={onClose}
+                aria-label="닫기"
+                className="-mr-2 flex h-10 w-10 items-center justify-center rounded-full text-xl text-stone-400 hover:bg-stone-100 active:bg-stone-200"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 pb-2">{children}</div>
+            {footer && <div className="pb-safe border-t border-stone-100 px-5 pt-3 sm:pb-5">{footer}</div>}
+          </div>
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return <span className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${className}`} aria-hidden="true" />;
+    }
+
+    function Toast({ toast }) {
+      if (!toast) return null;
+      const color = toast.type === 'error' ? 'bg-red-600' : 'bg-stone-800';
+      return (
+        <div
+          role="status"
+          className={`animate-toast bottom-safe fixed left-1/2 z-[70] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl px-4 py-3 text-sm text-white shadow-lg ${color}`}
+        >
+          {toast.message}
+        </div>
+      );
+    }
+
+    // 검색어를 <mark> 로 강조
+    function Highlight({ text, query }) {
+      if (!query) return text;
+      const lower = text.toLowerCase();
+      const q = query.toLowerCase();
+      const parts = [];
+      let i = 0, idx;
+      while ((idx = lower.indexOf(q, i)) !== -1) {
+        if (idx > i) parts.push(text.slice(i, idx));
+        parts.push(<mark key={idx} className="rounded bg-amber-200 px-0.5 text-inherit">{text.slice(idx, idx + q.length)}</mark>);
+        i = idx + q.length;
+      }
+      parts.push(text.slice(i));
+      return parts;
+    }
+
+    // ========================================
+    // 🧩 Layout Components
+    // ========================================
+    function Header({ count, query, onQueryChange, onNew }) {
+      return (
+        <header className="sticky top-0 z-40 border-b border-stone-200 bg-stone-100/90 backdrop-blur">
+          <div className="mx-auto max-w-3xl px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl" aria-hidden="true">📝</span>
+                <h1 className="text-xl font-bold">메모장</h1>
+                {count !== null && (
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs text-stone-500 ring-1 ring-stone-200">{count}개</span>
+                )}
+              </div>
+              {/* 데스크톱용 버튼 (모바일은 우측 하단 플로팅 버튼) */}
+              <Button onClick={onNew} className="hidden sm:inline-flex">+ 새 메모</Button>
+            </div>
+            <div className="relative mt-3">
+              <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" aria-hidden="true">🔍</span>
+              <Input
+                type="search"
+                value={query}
+                onChange={(e) => onQueryChange(e.target.value)}
+                placeholder="메모 내용으로 검색"
+                aria-label="메모 검색"
+                enterKeyHint="search"
+                maxLength={100}
+                className="pl-10"
+              />
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    function FloatingNewButton({ onClick }) {
+      return (
+        <button
+          onClick={onClick}
+          aria-label="새 메모"
+          className="bottom-safe fixed right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-amber-500 text-3xl text-white shadow-lg shadow-amber-500/30 transition active:scale-95 active:bg-amber-600 sm:hidden"
+        >
+          +
+        </button>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    function MemoList({ memos, loading, error, query, onSelect, onRetry, onNew }) {
+      if (loading && memos.length === 0) {
+        return <div className="flex items-center justify-center gap-2 py-16 text-sm text-stone-500"><Spinner /> 불러오는 중…</div>;
+      }
+      if (error) {
+        return (
+          <div className="py-16 text-center text-sm">
+            <p className="mb-3 text-red-500">{error}</p>
+            <Button variant="secondary" size="sm" onClick={onRetry}>다시 시도</Button>
+          </div>
+        );
+      }
+      if (memos.length === 0) {
+        return query ? (
+          <p className="py-16 text-center text-sm text-stone-500">“{query}” 검색 결과가 없습니다.</p>
+        ) : (
+          <div className="flex flex-col items-center gap-3 py-16 text-center text-stone-400">
+            <span className="text-5xl" aria-hidden="true">🗒️</span>
+            <p className="text-sm">아직 메모가 없어요.<br />새 메모를 작성해 보세요.</p>
+            <Button variant="secondary" onClick={onNew}>+ 새 메모</Button>
+          </div>
+        );
+      }
+      return (
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {memos.map((m) => (
+            <li key={m.id}>
+              <button
+                onClick={() => onSelect(m)}
+                className="flex h-full w-full flex-col rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-stone-200 transition
+                  hover:ring-amber-300 active:scale-[.99] active:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              >
+                <p className="truncate font-semibold"><Highlight text={m.title} query={query} /></p>
+                <p className="mt-1 line-clamp-3 flex-1 whitespace-pre-line break-words text-sm text-stone-600">
+                  {m.content ? <Highlight text={m.content} query={query} /> : <span className="italic text-stone-400">내용 없음</span>}
+                </p>
+                <p className="mt-2 text-xs text-stone-400">{formatDate(m.created_at)}</p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    // 새 메모 작성 / 기존 메모 수정 공용 레이어 팝업
+    function MemoFormModal({ memo, locked, onClose, onSave, onDelete }) {
+      const isOpen = !!memo;
+      const isNew = isOpen && !memo.id;
+      const [title, setTitle] = useState('');
+      const [content, setContent] = useState('');
+      const [titleError, setTitleError] = useState('');
+      const [saving, setSaving] = useState(false);
+      const titleRef = useRef(null);
+
+      useEffect(() => {
+        if (!memo) return;
+        setTitle(memo.title || '');
+        setContent(memo.content || '');
+        setTitleError('');
+        // 새 메모일 때만 자동 포커스 (모바일에서 수정 팝업마다 키보드가 올라오는 것 방지)
+        if (!memo.id) setTimeout(() => titleRef.current?.focus(), 50);
+      }, [memo]);
+
+      const dirty = isOpen && (title !== (memo.title || '') || content !== (memo.content || ''));
+
+      const requestClose = useCallback(() => {
+        if (saving || locked) return;
+        if (dirty && !window.confirm('저장하지 않은 내용이 있습니다. 닫을까요?')) return;
+        onClose();
+      }, [saving, locked, dirty, onClose]);
+
+      const handleSave = async () => {
+        if (saving) return;
+        if (!title.trim()) {
+          setTitleError('제목을 입력해 주세요.');
+          titleRef.current?.focus();
+          return;
+        }
+        setSaving(true);
+        try {
+          await onSave({ id: memo.id, title, content });
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      const onKeyDown = (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          handleSave();
+        }
+      };
+
+      return (
+        <Modal
+          isOpen={isOpen}
+          onClose={requestClose}
+          title={isNew ? '새 메모' : '메모 수정'}
+          footer={
+            <div className="flex items-center gap-2">
+              {!isNew && (
+                <Button variant="ghost" onClick={() => onDelete(memo)} disabled={saving} className="!text-red-600">
+                  삭제
+                </Button>
+              )}
+              <div className="ml-auto flex flex-1 gap-2 sm:flex-none">
+                <Button variant="secondary" onClick={requestClose} disabled={saving} className="flex-1 sm:flex-none">
+                  취소
+                </Button>
+                <Button onClick={handleSave} disabled={saving || (!isNew && !dirty)} className="flex-1 sm:flex-none">
+                  {saving && <Spinner />} {isNew ? '저장' : '수정 저장'}
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          {isOpen && (
+            <form className="flex flex-col gap-3" onKeyDown={onKeyDown} onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
+              {!isNew && <p className="text-xs text-stone-400">작성 {formatDate(memo.created_at)}</p>}
+              <div>
+                <label htmlFor="memo-title" className="mb-1 block text-sm font-medium text-stone-600">제목</label>
+                <Input
+                  id="memo-title"
+                  ref={titleRef}
+                  value={title}
+                  onChange={(e) => { setTitle(e.target.value); setTitleError(''); }}
+                  placeholder="제목을 입력하세요"
+                  maxLength={MAX_TITLE}
+                  enterKeyHint="next"
+                  aria-invalid={!!titleError}
+                  error={titleError}
+                />
+                {titleError && <p className="mt-1 text-xs text-red-500">{titleError}</p>}
+              </div>
+              <div>
+                <label htmlFor="memo-content" className="mb-1 block text-sm font-medium text-stone-600">내용</label>
+                <Textarea
+                  id="memo-content"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="내용을 입력하세요…"
+                  maxLength={MAX_CONTENT}
+                  rows={8}
+                  className="min-h-[35dvh] sm:min-h-[240px]"
+                />
+                <p className="mt-1 flex justify-between text-xs text-stone-400">
+                  <span>{dirty ? <span className="text-amber-600">● 저장 안 됨</span> : ' '}</span>
+                  <span>{content.length.toLocaleString()} / {MAX_CONTENT.toLocaleString()}자</span>
+                </p>
+              </div>
+            </form>
+          )}
+        </Modal>
+      );
+    }
+
+    function MemoPage() {
+      const [memos, setMemos] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+      const [query, setQuery] = useState('');
+      const [editing, setEditing] = useState(null); // null | {} (새 메모) | memo
+      const [deleteTarget, setDeleteTarget] = useState(null);
+      const [deleting, setDeleting] = useState(false);
+      const [toast, setToast] = useState(null);
+      const debouncedQuery = useDebounce(query.trim());
+
+      const showToast = useCallback((message, type = 'info') => {
+        setToast({ message, type, at: Date.now() });
+      }, []);
+
+      useEffect(() => {
+        if (!toast) return;
+        const t = setTimeout(() => setToast(null), 2200);
+        return () => clearTimeout(t);
+      }, [toast]);
+
+      const loadMemos = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const qs = debouncedQuery ? `?q=${encodeURIComponent(debouncedQuery)}` : '';
+          setMemos(await api(`/memos${qs}`));
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, [debouncedQuery]);
+
+      useEffect(() => { loadMemos(); }, [loadMemos]);
+
+      const openNew = () => setEditing({});
+      const closeEditor = useCallback(() => setEditing(null), []);
+
+      const handleSave = async ({ id, title, content }) => {
+        try {
+          const body = JSON.stringify({ title, content });
+          if (id) {
+            await api(`/memos/${id}`, { method: 'PUT', body });
+            showToast('메모를 수정했습니다.');
+          } else {
+            await api('/memos', { method: 'POST', body });
+            showToast('메모를 저장했습니다.');
+          }
+          setEditing(null);
+          await loadMemos();
+        } catch (e) {
+          showToast(e.message, 'error');
+        }
+      };
+
+      const confirmDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleting(true);
+        try {
+          await api(`/memos/${deleteTarget.id}`, { method: 'DELETE' });
+          setDeleteTarget(null);
+          setEditing(null);
+          showToast('메모를 삭제했습니다.');
+          await loadMemos();
+        } catch (e) {
+          showToast(e.message, 'error');
+        } finally {
+          setDeleting(false);
+        }
+      };
+
+      const closeDeleteModal = useCallback(() => !deleting && setDeleteTarget(null), [deleting]);
+
+      return (
+        <div className="min-h-[100dvh]">
+          <Header
+            count={debouncedQuery ? null : memos.length}
+            query={query}
+            onQueryChange={setQuery}
+            onNew={openNew}
+          />
+
+          <main className="mx-auto max-w-3xl px-4 pb-28 pt-4 sm:px-6 sm:pb-10">
+            {debouncedQuery && !error && (memos.length > 0 || !loading) && (
+              <p className="mb-3 text-sm text-stone-500">검색 결과 {memos.length}개</p>
+            )}
+            <MemoList
+              memos={memos}
+              loading={loading}
+              error={error}
+              query={debouncedQuery}
+              onSelect={setEditing}
+              onRetry={loadMemos}
+              onNew={openNew}
+            />
+          </main>
+
+          <FloatingNewButton onClick={openNew} />
+
+          {/* 삭제 확인 중에는 편집 팝업이 Escape/배경 클릭으로 닫히지 않게 한다 */}
+          <MemoFormModal
+            memo={editing}
+            locked={!!deleteTarget}
+            onClose={closeEditor}
+            onSave={handleSave}
+            onDelete={setDeleteTarget}
+          />
+
+          <Modal
+            isOpen={!!deleteTarget}
+            onClose={closeDeleteModal}
+            title="메모 삭제"
+            size="sm"
+            zIndex="z-[60]"
+            footer={
+              <div className="flex gap-2 sm:justify-end">
+                <Button variant="secondary" onClick={closeDeleteModal} disabled={deleting} className="flex-1 sm:flex-none">취소</Button>
+                <Button variant="danger" onClick={confirmDelete} disabled={deleting} className="flex-1 sm:flex-none">
+                  {deleting && <Spinner />} 삭제
+                </Button>
+              </div>
+            }
+          >
+            <p className="pb-3 text-sm text-stone-600">
+              “<span className="font-medium">{deleteTarget?.title}</span>” 메모를 삭제할까요?<br />삭제한 메모는 되돌릴 수 없습니다.
+            </p>
+          </Modal>
+
+          <Toast toast={toast} />
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return <MemoPage />;
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

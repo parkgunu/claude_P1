@@ -1,0 +1,14 @@
+{
+  "id": "gochujang",
+  "name": "고추장",
+  "category": "양념",
+  "quantity": 500,
+  "unit": "g",
+  "storage": "냉장",
+  "purchasedOn": "2026-04-02",
+  "expiresOn": "2027-04-02",
+  "tags": [
+    "양념"
+  ],
+  "note": ""
+}

@@ -1,0 +1,15 @@
+{
+  "name": "fridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "우리집 냉장고 - 냉장고 재료 관리 + 나만의 레시피 북 (PostgreSQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
+    "express": "^5.1.0",
+    "pg": "^8.13.1"
+  }
+}

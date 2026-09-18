@@ -1,0 +1,14 @@
+{
+  "id": "milk",
+  "name": "우유",
+  "category": "유제품",
+  "quantity": 900,
+  "unit": "ml",
+  "storage": "냉장",
+  "purchasedOn": "2026-09-09",
+  "expiresOn": "2026-09-19",
+  "tags": [
+    "급함"
+  ],
+  "note": "개봉함. 빨리 써야 함"
+}

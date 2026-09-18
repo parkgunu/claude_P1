@@ -1,0 +1,15 @@
+{
+  "id": "kimchi",
+  "name": "배추김치",
+  "category": "채소/절임",
+  "quantity": 600,
+  "unit": "g",
+  "storage": "냉장",
+  "purchasedOn": "2026-08-20",
+  "expiresOn": "2026-11-30",
+  "tags": [
+    "주재료",
+    "신김치"
+  ],
+  "note": "3주 넘어 시어짐. 볶음·찌개용으로 좋음"
+}

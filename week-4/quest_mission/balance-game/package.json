@@ -1,0 +1,14 @@
+{
+  "name": "balance-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "밸런스 게임 - 질문 등록 & 실시간 투표 (PostgreSQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.13.1"
+  }
+}
