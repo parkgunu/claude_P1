@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>라이카 필름 스튜디오</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- CDN 은 모두 버전 고정. Babel 은 7.x 만 인라인 text/babel 을 처리한다. -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-up { animation: fade-up 0.35s ease-out both; }
+
+    /* 셔터가 열리듯 천천히 밝아지는 로딩 플레이스홀더 */
+    @keyframes shutter {
+      0%, 100% { opacity: 0.35; }
+      50%      { opacity: 0.7; }
+    }
+    .animate-shutter { animation: shutter 1.6s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-neutral-950">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const API_BASE_URL = '/api';
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+
+    function Button({ variant = 'primary', size = 'md', disabled = false, type = 'button', onClick, className = '', children, ...rest }) {
+      const variants = {
+        primary: 'bg-red-600 text-white hover:bg-red-500 focus:ring-red-500',
+        secondary: 'bg-neutral-800 text-neutral-100 border border-neutral-700 hover:bg-neutral-700 focus:ring-neutral-500',
+        ghost: 'bg-transparent text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 focus:ring-neutral-600',
+      };
+      const sizes = {
+        sm: 'px-2.5 py-1 text-xs',
+        md: 'px-4 py-2 text-sm',
+        lg: 'px-6 py-3 text-base',
+      };
+      return (
+        <button
+          type={type}
+          onClick={onClick}
+          disabled={disabled}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition
+            focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-neutral-950
+            disabled:opacity-40 disabled:cursor-not-allowed
+            ${variants[variant]} ${sizes[size]} ${className}`}
+          {...rest}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Textarea({ label, value, onChange, placeholder, error, disabled = false, rows = 3, maxLength, hint, className = '' }) {
+      return (
+        <div className={`w-full ${className}`}>
+          {label && (
+            <div className="mb-1.5 flex items-baseline justify-between">
+              <label className="text-sm font-medium text-neutral-200">{label}</label>
+              {maxLength && (
+                <span className="text-xs text-neutral-600">{value.length} / {maxLength}</span>
+              )}
+            </div>
+          )}
+          <textarea
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            rows={rows}
+            maxLength={maxLength}
+            aria-invalid={!!error}
+            aria-label={label}
+            className={`w-full resize-none rounded-lg border bg-neutral-900 px-3 py-2.5 text-sm text-neutral-100
+              placeholder-neutral-600 transition focus:outline-none focus:ring-2 disabled:opacity-50
+              ${error ? 'border-red-500 focus:ring-red-500/40' : 'border-neutral-800 focus:ring-red-500/40'}`}
+          />
+          {error ? (
+            <p className="mt-1 text-xs text-red-400">{error}</p>
+          ) : hint ? (
+            <p className="mt-1 text-xs text-neutral-600">{hint}</p>
+          ) : null}
+        </div>
+      );
+    }
+
+    function Card({ className = '', children }) {
+      return (
+        <div className={`rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5 ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function Field({ label, children, className = '' }) {
+      return (
+        <div className={className}>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">{label}</p>
+          {children}
+        </div>
+      );
+    }
+
+    // 프리셋 선택용 칩 그룹. options: [{ id, label, hint }]
+    function ChipGroup({ options, value, onChange, disabled = false, ariaLabel }) {
+      return (
+        <div role="radiogroup" aria-label={ariaLabel} className="flex flex-wrap gap-1.5">
+          {options.map((opt) => {
+            const active = opt.id === value;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                disabled={disabled}
+                onClick={() => onChange(opt.id)}
+                title={opt.hint || opt.label}
+                className={`rounded-lg border px-3 py-1.5 text-left text-xs transition
+                  focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-40
+                  ${active
+                    ? 'border-red-500 bg-red-500/10 text-red-300'
+                    : 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:border-neutral-600 hover:text-neutral-200'}`}
+              >
+                <span className="block font-medium">{opt.label}</span>
+                {opt.hint && <span className="block text-[11px] text-neutral-600">{opt.hint}</span>}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return (
+        <span
+          role="status"
+          aria-label="로딩 중"
+          className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-neutral-700 border-t-red-500 ${className}`}
+        />
+      );
+    }
+
+    function Modal({ isOpen, onClose, title, children }) {
+      useEffect(() => {
+        if (!isOpen) return;
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => {
+          window.removeEventListener('keydown', onKey);
+          document.body.style.overflow = '';
+        };
+      }, [isOpen, onClose]);
+
+      if (!isOpen) return null;
+      return (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          onClick={onClose}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        >
+          <div onClick={(e) => e.stopPropagation()} className="max-h-full w-full max-w-4xl overflow-auto">
+            {children}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="닫기"
+            className="fixed right-4 top-4 rounded-full bg-neutral-900/80 px-3 py-1.5 text-sm text-neutral-300 hover:text-white"
+          >
+            ✕ 닫기
+          </button>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🧩 Common Components
+    // ========================================
+
+    function Header() {
+      return (
+        <header className="mb-8 flex items-center gap-3">
+          <span className="inline-block h-9 w-9 shrink-0 rounded-full border-4 border-red-600" aria-hidden="true" />
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-neutral-50 sm:text-2xl">라이카 필름 스튜디오</h1>
+            <p className="text-sm text-neutral-500">장면을 적으면 라이카로 찍은 듯한 사진을 만들어 드립니다</p>
+          </div>
+        </header>
+      );
+    }
+
+    const EXAMPLES = [
+      '비 오는 날 우산을 쓰고 횡단보도를 건너는 사람들',
+      '창가에서 커피잔을 든 여자의 옆모습',
+      '골목 노포 앞에 앉아 담배를 피우는 노인',
+      '새벽 시장에서 생선을 정리하는 상인의 손',
+      '눈 내리는 밤 편의점 앞에 선 고양이',
+    ];
+
+    function ExampleChips({ onPick, disabled }) {
+      return (
+        <div className="flex flex-wrap gap-1.5">
+          {EXAMPLES.map((ex) => (
+            <button
+              key={ex}
+              type="button"
+              disabled={disabled}
+              onClick={() => onPick(ex)}
+              className="rounded-full border border-neutral-800 px-2.5 py-1 text-[11px] text-neutral-500
+                transition hover:border-neutral-600 hover:text-neutral-300 disabled:opacity-40"
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function PhotoCard({ photo, index, onOpen }) {
+      return (
+        <figure
+          className="animate-fade-up group overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900"
+          style={{ animationDelay: `${index * 70}ms` }}
+        >
+          <button
+            type="button"
+            onClick={() => onOpen(photo)}
+            className="block w-full focus:outline-none focus:ring-2 focus:ring-red-500/50"
+            aria-label={`${index + 1}번째 사진 크게 보기`}
+          >
+            <img
+              src={photo.url}
+              alt={`생성된 라이카 스타일 사진 ${index + 1}`}
+              loading="lazy"
+              className="w-full transition duration-500 group-hover:scale-[1.02]"
+            />
+          </button>
+          <figcaption className="flex items-center justify-between px-3 py-2 text-[11px] text-neutral-500">
+            <span>{photo.width} × {photo.height}</span>
+            <a
+              href={`${API_BASE_URL}/download?url=${encodeURIComponent(photo.url)}`}
+              className="rounded px-2 py-0.5 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-100"
+            >
+              ↓ 저장
+            </a>
+          </figcaption>
+        </figure>
+      );
+    }
+
+    function LoadingGrid({ count }) {
+      return (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {Array.from({ length: count }).map((_, i) => (
+            <div
+              key={i}
+              className="animate-shutter flex aspect-[4/3] items-center justify-center rounded-xl border border-neutral-800 bg-neutral-900"
+              style={{ animationDelay: `${i * 200}ms` }}
+            >
+              <span className="text-xs text-neutral-600">현상 중…</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function EmptyState() {
+      return (
+        <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-800 px-6 py-16 text-center">
+          <span className="mb-3 inline-block h-12 w-12 rounded-full border-4 border-neutral-800" aria-hidden="true" />
+          <p className="text-sm text-neutral-400">아직 찍은 사진이 없습니다</p>
+          <p className="mt-1 text-xs text-neutral-600">왼쪽에 장면을 적고 셔터를 눌러보세요</p>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Component
+    // ========================================
+
+    function StudioPage() {
+      const [presets, setPresets] = useState(null);
+      const [presetError, setPresetError] = useState(null);
+
+      const [subject, setSubject] = useState('');
+      const [lens, setLens] = useState('summilux35');
+      const [look, setLook] = useState('classic');
+      const [mood, setMood] = useState('none');
+      const [ratio, setRatio] = useState('landscape_4_3');
+      const [count, setCount] = useState(2);
+
+      const [photos, setPhotos] = useState([]);
+      const [usedPrompt, setUsedPrompt] = useState('');
+      const [subjectEn, setSubjectEn] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [formError, setFormError] = useState(null);
+      const [copied, setCopied] = useState(false);
+      const [preview, setPreview] = useState(null);
+
+      const resultRef = useRef(null);
+
+      const request = useCallback(async (endpoint, options = {}) => {
+        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json || !json.success) {
+          throw new Error((json && json.message) || `요청에 실패했습니다. (${res.status})`);
+        }
+        return json.data;
+      }, []);
+
+      // 프리셋 목록은 서버가 단일 출처다.
+      useEffect(() => {
+        let alive = true;
+        request('/presets')
+          .then((data) => { if (alive) setPresets(data); })
+          .catch((err) => { if (alive) setPresetError(err.message); });
+        return () => { alive = false; };
+      }, [request]);
+
+      const handleGenerate = async (e) => {
+        e.preventDefault();
+        const trimmed = subject.trim();
+        if (!trimmed) {
+          setFormError('어떤 장면을 찍을지 입력해주세요.');
+          return;
+        }
+        setFormError(null);
+        setError(null);
+        setLoading(true);
+        try {
+          const data = await request('/generate', {
+            method: 'POST',
+            body: JSON.stringify({ subject: trimmed, lens, look, mood, ratio, count }),
+          });
+          setPhotos(data.images);
+          setUsedPrompt(data.prompt);
+          setSubjectEn(data.subjectEn);
+          if (resultRef.current) {
+            resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleCopyPrompt = async () => {
+        try {
+          await navigator.clipboard.writeText(usedPrompt);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          setError('클립보드 복사에 실패했습니다.');
+        }
+      };
+
+      return (
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:py-12">
+          <Header />
+
+          {presetError && (
+            <div role="alert" className="mb-6 rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+              설정을 불러오지 못했습니다: {presetError}
+            </div>
+          )}
+
+          <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
+            {/* ── 촬영 설정 ── */}
+            <Card className="h-fit">
+              <form onSubmit={handleGenerate} className="space-y-5">
+                <Textarea
+                  label="어떤 장면을 찍을까요?"
+                  value={subject}
+                  onChange={(e) => { setSubject(e.target.value); setFormError(null); }}
+                  placeholder="예) 비 오는 날 우산을 쓰고 횡단보도를 건너는 사람들"
+                  error={formError}
+                  hint="한국어로 쓰면 영어 장면 묘사로 자동 변환해 생성합니다"
+                  disabled={loading}
+                  maxLength={500}
+                  rows={3}
+                />
+
+                <ExampleChips onPick={(ex) => { setSubject(ex); setFormError(null); }} disabled={loading} />
+
+                {presets ? (
+                  <>
+                    <Field label="렌즈">
+                      <ChipGroup ariaLabel="렌즈 선택" options={presets.lenses} value={lens} onChange={setLens} disabled={loading} />
+                    </Field>
+
+                    <Field label="필름 · 색감">
+                      <ChipGroup ariaLabel="필름 선택" options={presets.looks} value={look} onChange={setLook} disabled={loading} />
+                    </Field>
+
+                    <Field label="분위기">
+                      <ChipGroup ariaLabel="분위기 선택" options={presets.moods} value={mood} onChange={setMood} disabled={loading} />
+                    </Field>
+
+                    <Field label="비율">
+                      <ChipGroup ariaLabel="비율 선택" options={presets.ratios} value={ratio} onChange={setRatio} disabled={loading} />
+                    </Field>
+
+                    <Field label="장 수">
+                      <ChipGroup
+                        ariaLabel="장 수 선택"
+                        options={[1, 2, 3, 4].map((n) => ({ id: n, label: `${n}장` }))}
+                        value={count}
+                        onChange={setCount}
+                        disabled={loading}
+                      />
+                    </Field>
+                  </>
+                ) : (
+                  !presetError && (
+                    <div className="flex items-center gap-2 py-6 text-sm text-neutral-500">
+                      <Spinner /> 설정을 불러오는 중…
+                    </div>
+                  )
+                )}
+
+                <Button type="submit" size="lg" disabled={loading || !presets || !subject.trim()} className="w-full">
+                  {loading ? (<><Spinner className="border-red-300 border-t-white" /> 현상하는 중…</>) : '📷 셔터 누르기'}
+                </Button>
+              </form>
+            </Card>
+
+            {/* ── 결과 ── */}
+            <section ref={resultRef} className="space-y-4">
+              {error && (
+                <div role="alert" className="rounded-lg border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+                  {error}
+                </div>
+              )}
+
+              {loading ? (
+                <LoadingGrid count={count} />
+              ) : photos.length === 0 ? (
+                <EmptyState />
+              ) : (
+                <>
+                  {subjectEn && (
+                    <p className="rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-500">
+                      <span className="text-neutral-400">이렇게 해석했습니다 → </span>
+                      {subjectEn}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {photos.map((photo, i) => (
+                      <PhotoCard key={photo.url} photo={photo} index={i} onOpen={setPreview} />
+                    ))}
+                  </div>
+
+                  <details className="rounded-xl border border-neutral-800 bg-neutral-900/60 px-4 py-3">
+                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                      사용된 프롬프트
+                    </summary>
+                    <p className="mt-2 break-words text-xs leading-relaxed text-neutral-400">{usedPrompt}</p>
+                    <Button variant="ghost" size="sm" onClick={handleCopyPrompt} className="mt-2">
+                      {copied ? '복사됨 ✓' : '프롬프트 복사'}
+                    </Button>
+                  </details>
+                </>
+              )}
+            </section>
+          </div>
+
+          <Modal isOpen={!!preview} onClose={() => setPreview(null)} title="사진 크게 보기">
+            {preview && (
+              <img
+                src={preview.url}
+                alt="크게 본 사진"
+                className="mx-auto max-h-[85vh] w-auto rounded-lg"
+              />
+            )}
+          </Modal>
+
+          <p className="mt-10 text-center text-xs text-neutral-700">
+            fal.ai FLUX.1 [dev] 로 생성됩니다 · 실제 라이카 촬영물이 아닌 AI 생성 이미지입니다
+          </p>
+        </div>
+      );
+    }
+
+    // ========================================
+    // 🚀 App
+    // ========================================
+
+    function App() {
+      return <StudioPage />;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

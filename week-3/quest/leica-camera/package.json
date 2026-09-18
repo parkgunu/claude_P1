@@ -1,0 +1,14 @@
+{
+  "name": "leica-camera",
+  "version": "1.0.0",
+  "private": true,
+  "description": "라이카로 찍은 느낌의 사진을 생성하는 앱 (React CDN + fal.ai flux/dev 프록시)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0"
+  }
+}
