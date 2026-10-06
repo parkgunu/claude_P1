@@ -1,0 +1,16 @@
+{
+  "name": "offday-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OFFDAY - 상품 목록 / 회원가입·로그인 / 장바구니 쇼핑몰 (PostgreSQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.13.1"
+  }
+}

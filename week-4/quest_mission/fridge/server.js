@@ -2,6 +2,8 @@ const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
+const { estimateCalories } = require('./calories');
+const { hashPassword, verifyPassword, signToken, requireAuth, secretProblem } = require('./auth');
 
 // 로컬에서는 같은 폴더의 .env 를 읽는다. Vercel 에서는 파일이 없으므로 대시보드 환경변수를 쓴다.
 try {
@@ -113,6 +115,24 @@ function initDB() {
       await pool.query(
         `ALTER TABLE fridge_recipes ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'`
       );
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS fridge_users (
+          id            SERIAL PRIMARY KEY,
+          email         TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          name          TEXT NOT NULL,
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `);
+      // 재료·레시피는 사용자별로 나뉜다. 로그인 기능 이전 데이터는 user_id 가 NULL 로 남아 있다가
+      // 첫 가입자에게 넘어간다 (아래 signup 참고).
+      for (const table of ['fridge_ingredients', 'fridge_recipes']) {
+        await pool.query(
+          `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS
+             user_id INTEGER REFERENCES fridge_users(id) ON DELETE CASCADE`
+        );
+        await pool.query(`CREATE INDEX IF NOT EXISTS ${table}_user_id_idx ON ${table} (user_id)`);
+      }
     })().catch((err) => {
       dbReady = null; // 실패하면 다음 요청에서 다시 시도
       throw err;
@@ -144,11 +164,18 @@ const toRecipe = (row) => ({
   steps: row.steps,
   source: row.source,
   createdAt: row.created_at,
+  // 재료 문자열에서 그때그때 계산한다 (DB 에 저장하지 않으므로 표가 좋아지면 기존 레시피도 같이 정확해진다)
+  calories: estimateCalories(row.ingredients),
 });
 
 // ── Validation helpers ───────────────────────────────────────────
 
-const LIMITS = { name: 30, quantity: 20, title: 50, ingredient: 30, ingredients: 30, steps: 3000, request: 200 };
+const toUser = (row) => ({ id: row.id, email: row.email, name: row.name, createdAt: row.created_at });
+
+const LIMITS = { name: 30, quantity: 20, title: 50, ingredient: 30, ingredients: 30, steps: 3000, request: 200, userName: 20, email: 120, password: 72 };
+
+// 로컬파트@도메인.tld 정도만 본다 (진짜 확인은 어차피 메일 발송으로만 가능하다)
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const parseId = (v) => (/^\d+$/.test(v) ? Number(v) : null);
 const str = (v) => (typeof v === 'string' ? v.trim() : '');
 
@@ -181,12 +208,102 @@ app.get('/api/config', (_req, res) => {
   res.json({ success: true, data: { aiReady: !!getAnthropic(), aiModel: aiModel() } });
 });
 
+// ── API routes: 인증 ─────────────────────────────────────────────
+
+// 회원가입 → 바로 로그인된 상태로 토큰을 내려준다
+app.post('/api/auth/signup', async (req, res, next) => {
+  try {
+    const email = str(req.body?.email).toLowerCase();
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const name = str(req.body?.name);
+
+    if (!EMAIL_RE.test(email)) return badRequest(res, '이메일 형식이 올바르지 않습니다.');
+    if (email.length > LIMITS.email) return badRequest(res, `이메일은 ${LIMITS.email}자 이내로 입력해 주세요.`);
+    if (!name) return badRequest(res, '이름을 입력해 주세요.');
+    if (name.length > LIMITS.userName) return badRequest(res, `이름은 ${LIMITS.userName}자 이내로 입력해 주세요.`);
+    if (password.length < 8) return badRequest(res, '비밀번호는 8자 이상이어야 합니다.');
+    // bcrypt 는 72바이트를 넘으면 뒤를 잘라 버리므로 미리 막는다
+    if (Buffer.byteLength(password) > LIMITS.password) return badRequest(res, '비밀번호가 너무 깁니다.');
+
+    const passwordHash = await hashPassword(password);
+
+    let user;
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO fridge_users (email, password_hash, name) VALUES ($1, $2, $3)
+         RETURNING id, email, name, created_at`,
+        [email, passwordHash, name]
+      );
+      user = rows[0];
+    } catch (err) {
+      if (err.code === '23505') return res.status(409).json({ success: false, message: '이미 가입된 이메일입니다.' });
+      throw err;
+    }
+
+    // 로그인 기능이 생기기 전에 쌓여 있던 재료·레시피는 첫 가입자의 냉장고로 넘긴다
+    const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM fridge_users');
+    if (count === 1) {
+      await pool.query('UPDATE fridge_ingredients SET user_id = $1 WHERE user_id IS NULL', [user.id]);
+      await pool.query('UPDATE fridge_recipes SET user_id = $1 WHERE user_id IS NULL', [user.id]);
+    }
+
+    res.status(201).json({ success: true, data: { token: signToken(user), user: toUser(user) } });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+    next(err);
+  }
+});
+
+// 로그인
+app.post('/api/auth/login', async (req, res, next) => {
+  try {
+    const email = str(req.body?.email).toLowerCase();
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!email || !password) return badRequest(res, '이메일과 비밀번호를 입력해 주세요.');
+
+    const { rows } = await pool.query(
+      'SELECT id, email, name, password_hash, created_at FROM fridge_users WHERE email = $1',
+      [email]
+    );
+    const user = rows[0];
+    // 어느 쪽이 틀렸는지 알려 주면 가입된 이메일을 찾아낼 수 있으므로 같은 문구를 쓴다
+    const ok = user && (await verifyPassword(password, user.password_hash));
+    if (!ok) {
+      return res.status(401).json({ success: false, message: '이메일 또는 비밀번호가 올바르지 않습니다.' });
+    }
+
+    res.json({ success: true, data: { token: signToken(user), user: toUser(user) } });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+    next(err);
+  }
+});
+
+// 저장해 둔 토큰이 아직 쓸 수 있는지 확인 (새로고침할 때마다 부른다)
+app.get('/api/auth/me', requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, email, name, created_at FROM fridge_users WHERE id = $1',
+      [req.userId]
+    );
+    if (!rows[0]) return res.status(401).json({ success: false, message: '탈퇴했거나 없는 계정입니다.' });
+    res.json({ success: true, data: { user: toUser(rows[0]) } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── 여기서부터는 로그인한 사용자만 ───────────────────────────────
+app.use('/api', requireAuth);
+
 // 재료 목록 (유통기한 임박순 → 최근 등록순)
-app.get('/api/ingredients', async (_req, res, next) => {
+app.get('/api/ingredients', async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT ${INGREDIENT_COLUMNS} FROM fridge_ingredients
-        ORDER BY expires_on ASC NULLS LAST, created_at DESC`
+        WHERE user_id = $1
+        ORDER BY expires_on ASC NULLS LAST, created_at DESC`,
+      [req.userId]
     );
     res.json({ success: true, data: rows.map(toIngredient) });
   } catch (err) {
@@ -211,10 +328,10 @@ app.post('/api/ingredients', async (req, res, next) => {
     if (expiresOn && !isValidDate(expiresOn)) return badRequest(res, '유통기한 날짜가 올바르지 않습니다.');
 
     const { rows } = await pool.query(
-      `INSERT INTO fridge_ingredients (name, zone, category, quantity, expires_on)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO fridge_ingredients (name, zone, category, quantity, expires_on, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING ${INGREDIENT_COLUMNS}`,
-      [name, zone, category, quantity, expiresOn]
+      [name, zone, category, quantity, expiresOn, req.userId]
     );
     res.status(201).json({ success: true, data: toIngredient(rows[0]) });
   } catch (err) {
@@ -227,7 +344,7 @@ app.delete('/api/ingredients/:id', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     const { rowCount } = id
-      ? await pool.query('DELETE FROM fridge_ingredients WHERE id = $1', [id])
+      ? await pool.query('DELETE FROM fridge_ingredients WHERE id = $1 AND user_id = $2', [id, req.userId])
       : { rowCount: 0 };
     if (!rowCount) {
       return res.status(404).json({ success: false, message: '재료를 찾을 수 없습니다.' });
@@ -241,10 +358,11 @@ app.delete('/api/ingredients/:id', async (req, res, next) => {
 // ── API routes: recipes ──────────────────────────────────────────
 
 // 레시피 목록 (최신순)
-app.get('/api/recipes', async (_req, res, next) => {
+app.get('/api/recipes', async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT ${RECIPE_COLUMNS} FROM fridge_recipes ORDER BY created_at DESC`
+      `SELECT ${RECIPE_COLUMNS} FROM fridge_recipes WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.userId]
     );
     res.json({ success: true, data: rows.map(toRecipe) });
   } catch (err) {
@@ -272,9 +390,9 @@ app.post('/api/recipes', async (req, res, next) => {
     if (steps.length > LIMITS.steps) return badRequest(res, `조리법은 ${LIMITS.steps}자 이내로 입력해 주세요.`);
 
     const { rows } = await pool.query(
-      `INSERT INTO fridge_recipes (title, ingredients, steps) VALUES ($1, $2, $3)
+      `INSERT INTO fridge_recipes (title, ingredients, steps, user_id) VALUES ($1, $2, $3, $4)
        RETURNING ${RECIPE_COLUMNS}`,
-      [title, ingredients, steps]
+      [title, ingredients, steps, req.userId]
     );
     res.status(201).json({ success: true, data: toRecipe(rows[0]) });
   } catch (err) {
@@ -383,9 +501,9 @@ app.post('/api/recipes/generate', async (req, res, next) => {
 
     const { rows } = await pool.query(
       `SELECT ${INGREDIENT_COLUMNS} FROM fridge_ingredients
-        ${ids ? 'WHERE id = ANY($1)' : ''}
+        WHERE user_id = $1 ${ids ? 'AND id = ANY($2)' : ''}
         ORDER BY expires_on ASC NULLS LAST, created_at DESC`,
-      ids ? [ids] : []
+      ids ? [req.userId, ids] : [req.userId]
     );
     if (!rows.length) {
       return badRequest(res, ids ? '고른 재료를 찾을 수 없어요. 목록을 새로고침해 주세요.' : '냉장고가 비어 있어요. 재료를 먼저 넣어 주세요.');
@@ -414,9 +532,9 @@ app.post('/api/recipes/generate', async (req, res, next) => {
     }
 
     const { rows: saved } = await pool.query(
-      `INSERT INTO fridge_recipes (title, ingredients, steps, source) VALUES ($1, $2, $3, 'ai')
+      `INSERT INTO fridge_recipes (title, ingredients, steps, source, user_id) VALUES ($1, $2, $3, 'ai', $4)
        RETURNING ${RECIPE_COLUMNS}`,
-      [title, ingredients, steps]
+      [title, ingredients, steps, req.userId]
     );
     res.status(201).json({ success: true, data: toRecipe(saved[0]) });
   } catch (err) {
@@ -430,7 +548,7 @@ app.delete('/api/recipes/:id', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     const { rowCount } = id
-      ? await pool.query('DELETE FROM fridge_recipes WHERE id = $1', [id])
+      ? await pool.query('DELETE FROM fridge_recipes WHERE id = $1 AND user_id = $2', [id, req.userId])
       : { rowCount: 0 };
     if (!rowCount) {
       return res.status(404).json({ success: false, message: '레시피를 찾을 수 없습니다.' });
@@ -464,6 +582,11 @@ app.use((err, _req, res, _next) => {
 
 // Local: 서버 시작 / Vercel: app export
 if (require.main === module) {
+  const problem = secretProblem();
+  if (problem) {
+    console.error(`❌ ${problem}`);
+    process.exit(1);
+  }
   if (!getAnthropic()) {
     console.warn('⚠️  ANTHROPIC_API_KEY 가 없어 AI 레시피 생성이 꺼진 채로 시작합니다.');
     console.warn('    .env 에 키를 추가하면 재시작 없이 바로 켜집니다.');

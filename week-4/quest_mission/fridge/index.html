@@ -316,6 +316,12 @@
       });
     }
 
+    // 서버가 재료에서 추정한 칼로리. 근사치라 항상 '약' 을 붙이고, 못 읽은 재료가 있으면 '+' 로 알린다.
+    function kcalLabel(calories) {
+      if (!calories || !calories.items.length || calories.unknown === calories.items.length) return null;
+      return `약 ${calories.total.toLocaleString()}${calories.unknown ? '+' : ''} kcal`;
+    }
+
     const parseSteps = (steps) =>
       steps.split('\n').map((s) => s.replace(/^\s*\d+\s*[.)]\s*/, '').trim()).filter(Boolean);
 
@@ -335,12 +341,39 @@
     // 📡 API
     // ========================================
 
+    // JWT 는 localStorage 에 두고 Authorization 헤더로 보낸다.
+    // api() 는 컴포넌트 밖에서도 불리므로 토큰을 모듈 변수로 들고 있는다.
+    const TOKEN_KEY = 'fridge.token';
+    let authToken = null;
+    let onUnauthorized = () => {};
+
+    // localStorage 는 브라우저 설정에 따라 막힐 수 있어 항상 감싼다
+    const tokenStore = {
+      read() {
+        try { return localStorage.getItem(TOKEN_KEY); } catch (_err) { return null; }
+      },
+      write(token) {
+        try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch (_err) {}
+      },
+    };
+
+    function setAuthToken(token) {
+      authToken = token;
+      tokenStore.write(token);
+    }
+
+    authToken = tokenStore.read();
+
     async function api(endpoint, options = {}) {
       let res;
       try {
         res = await fetch(`${API_BASE_URL}${endpoint}`, {
           ...options,
-          headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+            ...(options.headers || {}),
+          },
         });
       } catch (_err) {
         throw new Error('서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해 주세요.');
@@ -350,6 +383,11 @@
         body = await res.json();
       } catch (_err) {
         // JSON 이 아닌 응답
+      }
+      // 토큰이 만료·폐기됐으면 들고 있어 봐야 소용없으니 바로 로그아웃시킨다
+      if (res.status === 401 && !endpoint.startsWith('/auth/login') && !endpoint.startsWith('/auth/signup')) {
+        setAuthToken(null);
+        onUnauthorized(body?.message);
       }
       if (!res.ok || !body?.success) {
         throw new Error(body?.message || `요청에 실패했습니다. (${res.status})`);
@@ -528,20 +566,29 @@
     // 🧩 Common / Layout Components
     // ========================================
 
-    function Header({ fridgeCount, freezerCount, recipeCount }) {
+    function Header({ fridgeCount, freezerCount, recipeCount, user, onLogout }) {
       return (
         <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 pt-6 sm:pt-10">
           <div className="flex items-center gap-3">
             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-mint-300 text-2xl shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-6px_rgba(47,94,79,.6)]" aria-hidden="true">🧊</div>
             <div>
-              <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">우리집 냉장고</h1>
+              <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+                {user ? `${user.name}님의 냉장고` : '우리집 냉장고'}
+              </h1>
               <p className="text-sm text-slate-500">재료는 냉장고 안에, 레시피는 메모로 붙여두세요</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2" aria-label="보관 현황">
-            <Badge tone="mint">🧊 냉장 {fridgeCount}</Badge>
-            <Badge tone="slate">❄️ 냉동 {freezerCount}</Badge>
-            <Badge tone="coral">📒 레시피 {recipeCount}</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-2" aria-label="보관 현황">
+              <Badge tone="mint">🧊 냉장 {fridgeCount}</Badge>
+              <Badge tone="slate">❄️ 냉동 {freezerCount}</Badge>
+              <Badge tone="coral">📒 레시피 {recipeCount}</Badge>
+            </div>
+            {user && (
+              <Button variant="ghost" size="sm" onClick={onLogout} className="ml-1" title={user.email}>
+                로그아웃
+              </Button>
+            )}
           </div>
         </header>
       );
@@ -805,6 +852,7 @@
       const tilt = NOTE_TILT[index % NOTE_TILT.length];
       const total = recipe.ingredients.length;
       const ratio = total ? recipe.haveCount / total : 0;
+      const kcal = kcalLabel(recipe.calories);
 
       return (
         <button
@@ -830,7 +878,11 @@
           <span className="mt-3 block">
             <span className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
               <span>냉장고 재료 {recipe.haveCount}/{total}</span>
-              <span>{parseSteps(recipe.steps).length}단계</span>
+              <span className="flex items-center gap-1">
+                {kcal && <span className="text-coral-600">🔥 {kcal}</span>}
+                {kcal && <span className="text-slate-400" aria-hidden="true">·</span>}
+                <span>{parseSteps(recipe.steps).length}단계</span>
+              </span>
             </span>
             <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-white/60">
               <span className="block h-full rounded-full bg-mint-500 transition-all" style={{ width: `${ratio * 100}%` }} />
@@ -945,6 +997,12 @@
       if (!recipe) return null;
       const steps = parseSteps(recipe.steps);
       const missing = recipe.ingredients.filter((_, i) => !recipe.matched[i]);
+      const cal = recipe.calories;
+      const kcal = kcalLabel(cal);
+      const calNotes = [
+        cal && cal.unknown > 0 && `재료 ${cal.unknown}개는 계산에서 빠졌어요`,
+        cal && cal.assumed && '분량이 안 적힌 재료는 1인분 기준',
+      ].filter(Boolean);
 
       return (
         <Modal
@@ -964,11 +1022,28 @@
             {formatDate(recipe.createdAt)}에 {recipe.source === 'ai' ? '생성' : '작성'}
           </p>
 
+          {kcal && (
+            <div className="mt-4 flex items-center gap-3 rounded-2xl bg-amber-50 px-4 py-3 ring-1 ring-amber-200">
+              <span className="text-2xl" aria-hidden="true">🔥</span>
+              <div className="min-w-0">
+                <p className="text-lg font-extrabold leading-tight text-amber-900">{kcal}</p>
+                <p className="mt-0.5 text-xs text-amber-700">
+                  레시피 전체 분량 기준 추정치{calNotes.length > 0 && ` · ${calNotes.join(' · ')}`}
+                </p>
+              </div>
+            </div>
+          )}
+
           <h3 className="mt-5 text-sm font-bold text-slate-700">재료 <span className="font-medium text-slate-400">· 냉장고에 {recipe.haveCount}/{recipe.ingredients.length}개</span></h3>
           <ul className="mt-2 flex flex-wrap gap-2">
             {recipe.ingredients.map((ing, i) => (
               <li key={ing} className={`rounded-full px-3 py-1.5 text-sm font-medium ${recipe.matched[i] ? 'bg-mint-100 text-mint-700' : 'bg-white text-slate-500 ring-1 ring-slate-200'}`}>
                 {recipe.matched[i] ? '✓' : '🛒'} {ing}
+                {cal && cal.items[i] && (
+                  <span className="ml-1.5 text-xs font-semibold text-slate-400" title={`약 ${cal.items[i].grams}g 기준`}>
+                    {cal.items[i].kcal}kcal
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -1398,10 +1473,154 @@
     }
 
     // ========================================
+    // 🔐 Auth Page
+    // ========================================
+
+    function AuthPage({ onAuthed }) {
+      const [mode, setMode] = useState('login'); // 'login' | 'signup'
+      const [values, setValues] = useState({ email: '', password: '', name: '' });
+      const [errors, setErrors] = useState({});
+      const [serverError, setServerError] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const isSignup = mode === 'signup';
+
+      const set = (key) => (e) => {
+        setValues((v) => ({ ...v, [key]: e.target.value }));
+        setErrors((prev) => (prev[key] ? { ...prev, [key]: null } : prev));
+      };
+
+      function switchMode(next) {
+        setMode(next);
+        setErrors({});
+        setServerError(null);
+      }
+
+      // 서버에서도 같은 규칙으로 검사하지만, 왕복 없이 바로 알려 주는 편이 낫다
+      function validate() {
+        const next = {};
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.email.trim())) next.email = '이메일 형식이 올바르지 않습니다.';
+        if (values.password.length < 8) next.password = '비밀번호는 8자 이상이어야 합니다.';
+        if (isSignup && !values.name.trim()) next.name = '이름을 입력해 주세요.';
+        setErrors(next);
+        return Object.keys(next).length === 0;
+      }
+
+      async function handleSubmit(e) {
+        e.preventDefault();
+        setServerError(null);
+        if (!validate()) return;
+
+        setBusy(true);
+        try {
+          const payload = isSignup
+            ? { email: values.email.trim(), password: values.password, name: values.name.trim() }
+            : { email: values.email.trim(), password: values.password };
+          const data = await api(isSignup ? '/auth/signup' : '/auth/login', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          onAuthed(data.token, data.user, isSignup);
+        } catch (err) {
+          setServerError(err.message);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      return (
+        <div className="grid min-h-screen place-items-center px-4 py-10">
+          <div className="w-full max-w-md">
+            <div className="mb-6 flex flex-col items-center text-center">
+              <div className="grid h-16 w-16 place-items-center rounded-3xl bg-mint-300 text-3xl shadow-[inset_0_2px_0_rgba(255,255,255,.6),0_6px_14px_-6px_rgba(47,94,79,.6)]" aria-hidden="true">🧊</div>
+              <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl">우리집 냉장고</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                {isSignup ? '계정을 만들면 나만의 냉장고가 생겨요' : '로그인하고 내 냉장고를 열어보세요'}
+              </p>
+            </div>
+
+            <Card className="p-6 sm:p-7">
+              <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1" role="tablist">
+                {[['login', '로그인'], ['signup', '회원가입']].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === value}
+                    onClick={() => switchMode(value)}
+                    className={`rounded-xl px-3 py-2 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint-400 ${
+                      mode === value ? 'bg-white text-ink shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <form onSubmit={handleSubmit} noValidate className="space-y-4">
+                {isSignup && (
+                  <Input
+                    label="이름"
+                    value={values.name}
+                    onChange={set('name')}
+                    error={errors.name}
+                    maxLength={20}
+                    placeholder="냉장고에 표시할 이름"
+                    autoComplete="name"
+                  />
+                )}
+                <Input
+                  label="이메일"
+                  type="email"
+                  value={values.email}
+                  onChange={set('email')}
+                  error={errors.email}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  autoFocus
+                />
+                <Input
+                  label="비밀번호"
+                  type="password"
+                  value={values.password}
+                  onChange={set('password')}
+                  error={errors.password}
+                  hint={isSignup ? '8자 이상' : undefined}
+                  placeholder="••••••••"
+                  autoComplete={isSignup ? 'new-password' : 'current-password'}
+                />
+
+                {serverError && (
+                  <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600" role="alert">
+                    {serverError}
+                  </p>
+                )}
+
+                <Button type="submit" disabled={busy} className="w-full justify-center">
+                  {busy ? <><Spinner /> {isSignup ? '만드는 중…' : '여는 중…'}</> : isSignup ? '가입하고 시작하기' : '로그인'}
+                </Button>
+              </form>
+            </Card>
+
+            <p className="mt-4 text-center text-sm text-slate-500">
+              {isSignup ? '이미 계정이 있나요?' : '아직 계정이 없나요?'}{' '}
+              <button
+                type="button"
+                onClick={() => switchMode(isSignup ? 'login' : 'signup')}
+                className="font-bold text-mint-700 underline-offset-2 hover:underline"
+              >
+                {isSignup ? '로그인' : '회원가입'}
+              </button>
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // ========================================
     // 📄 Page Component
     // ========================================
 
-    function FridgePage() {
+    function FridgePage({ user, onLogout }) {
       const ingredientsState = useCollection('/ingredients');
       const recipesState = useCollection('/recipes');
       const ingredients = ingredientsState.data;
@@ -1520,6 +1739,8 @@
             fridgeCount={ingredients.filter((i) => i.zone === 'fridge').length}
             freezerCount={ingredients.filter((i) => i.zone === 'freezer').length}
             recipeCount={recipes.length}
+            user={user}
+            onLogout={onLogout}
           />
 
           <main className="mx-auto mt-8 grid max-w-6xl items-start gap-12 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
@@ -1615,7 +1836,66 @@
     // ========================================
 
     function App() {
-      return <FridgePage />;
+      const [user, setUser] = useState(null);
+      // 저장된 토큰이 아직 유효한지 확인하는 동안은 아무 화면도 보여 주지 않는다
+      const [checking, setChecking] = useState(() => !!authToken);
+      const [notice, setNotice] = useState(null);
+
+      const logout = useCallback((message) => {
+        setAuthToken(null);
+        setUser(null);
+        setNotice(message || null);
+      }, []);
+
+      // api() 가 401 을 받으면(토큰 만료 등) 이 콜백으로 로그아웃시킨다
+      useEffect(() => {
+        onUnauthorized = (message) => logout(message);
+        return () => { onUnauthorized = () => {}; };
+      }, [logout]);
+
+      useEffect(() => {
+        if (!authToken) return;
+        let alive = true;
+        api('/auth/me')
+          .then((data) => { if (alive) setUser(data.user); })
+          .catch(() => {}) // 401 이면 위 onUnauthorized 가 이미 정리했다
+          .finally(() => { if (alive) setChecking(false); });
+        return () => { alive = false; };
+      }, []);
+
+      if (checking) {
+        return (
+          <div className="grid min-h-screen place-items-center">
+            <p className="flex items-center gap-2 text-sm font-semibold text-slate-500">
+              <Spinner /> 냉장고 문을 여는 중…
+            </p>
+          </div>
+        );
+      }
+
+      if (!user) {
+        return (
+          <>
+            {notice && (
+              <div className="mx-auto max-w-md px-4 pt-6">
+                <p className="rounded-2xl bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-800 ring-1 ring-amber-200" role="status">
+                  {notice}
+                </p>
+              </div>
+            )}
+            <AuthPage
+              onAuthed={(token, nextUser) => {
+                setAuthToken(token);
+                setNotice(null);
+                setUser(nextUser);
+              }}
+            />
+          </>
+        );
+      }
+
+      // key 를 걸어 계정이 바뀌면 이전 사용자의 재료·레시피가 남지 않게 한다
+      return <FridgePage key={user.id} user={user} onLogout={() => logout()} />;
     }
 
     // ========================================

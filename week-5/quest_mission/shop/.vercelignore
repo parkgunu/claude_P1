@@ -1,0 +1,12 @@
+# 비밀값은 Vercel 대시보드 환경변수로 넣는다. 파일째 올리지 않는다.
+.env
+
+node_modules/
+server.log
+
+# 문서용 스크린샷은 배포에 필요 없다
+*.png
+README.md
+
+.env*.local
+.vercel

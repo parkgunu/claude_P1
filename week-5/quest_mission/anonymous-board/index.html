@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>속닥속닥 · 익명 게시판</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <!-- ⚠️ 모든 CDN 버전 고정. Babel 은 반드시 7.x (8.x 는 인라인 text/babel 이 깨진다) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+  <style>
+    @keyframes pop {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.35); }
+      100% { transform: scale(1); }
+    }
+    .animate-pop { animation: pop 0.35s ease-out; }
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in { animation: fade-in 0.3s ease-out both; }
+  </style>
+</head>
+<body class="bg-stone-50 text-stone-800 antialiased">
+  <div id="root"></div>
+  <script type="text/babel">
+    // ========================================
+    // React Hooks Destructuring
+    // ========================================
+    const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+    // ========================================
+    // ⚙️ Config & Helpers
+    // ========================================
+    const API_BASE_URL = '/api';
+    const CONTENT_MAX = 500;
+
+    const CATEGORIES = [
+      { value: '고민', emoji: '🌧️', chip: 'bg-slate-100 text-slate-700 ring-slate-200', active: 'bg-slate-700 text-white ring-slate-700' },
+      { value: '칭찬', emoji: '🌷', chip: 'bg-rose-50 text-rose-700 ring-rose-200', active: 'bg-rose-500 text-white ring-rose-500' },
+      { value: '응원', emoji: '🔥', chip: 'bg-amber-50 text-amber-700 ring-amber-200', active: 'bg-amber-500 text-white ring-amber-500' },
+      { value: '관심사', emoji: '🔭', chip: 'bg-sky-50 text-sky-700 ring-sky-200', active: 'bg-sky-600 text-white ring-sky-600' },
+      { value: '기타', emoji: '💬', chip: 'bg-violet-50 text-violet-700 ring-violet-200', active: 'bg-violet-600 text-white ring-violet-600' },
+    ];
+    const CATEGORY_BY_VALUE = Object.fromEntries(CATEGORIES.map((c) => [c.value, c]));
+
+    // JWT 는 localStorage 에 둔다. 사생활 보호 모드 등으로 막혀 있으면 메모리에만 들고 간다.
+    const TOKEN_KEY = 'anon-board-token';
+    let memoryToken = null;
+
+    const tokenStore = {
+      get() {
+        try {
+          return localStorage.getItem(TOKEN_KEY) || memoryToken;
+        } catch (_err) {
+          return memoryToken;
+        }
+      },
+      set(token) {
+        memoryToken = token;
+        try {
+          if (token) localStorage.setItem(TOKEN_KEY, token);
+          else localStorage.removeItem(TOKEN_KEY);
+        } catch (_err) {
+          // 저장이 막혀도 이번 세션 동안은 memoryToken 으로 동작한다
+        }
+      },
+    };
+
+    async function api(endpoint, options = {}) {
+      const token = tokenStore.get();
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...options.headers,
+        },
+      });
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (_err) {
+        // JSON 이 아닌 응답
+      }
+      if (!res.ok || !body?.success) {
+        const err = new Error(body?.message || '요청을 처리하지 못했습니다.');
+        err.status = res.status;
+        throw err;
+      }
+      return body.data;
+    }
+
+    function timeAgo(iso) {
+      const diff = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+      if (diff < 60) return '방금 전';
+      if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+      if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}일 전`;
+      return new Date(iso).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+    }
+
+    // ========================================
+    // 🔐 Auth Context
+    // ========================================
+    const AuthContext = React.createContext(null);
+    const useAuth = () => React.useContext(AuthContext);
+
+    function AuthProvider({ children }) {
+      const [user, setUser] = useState(null);
+      // 저장된 토큰을 확인하기 전에는 화면을 그리지 않는다 (로그인 상태가 깜빡이지 않도록)
+      const [ready, setReady] = useState(false);
+      const [modal, setModal] = useState(null); // null | 'login' | 'signup'
+
+      useEffect(() => {
+        let alive = true;
+        (async () => {
+          if (!tokenStore.get()) return setReady(true);
+          try {
+            const data = await api('/auth/me');
+            if (alive) setUser(data.user);
+          } catch (_err) {
+            tokenStore.set(null); // 만료됐거나 못 쓰는 토큰
+          } finally {
+            if (alive) setReady(true);
+          }
+        })();
+        return () => { alive = false; };
+      }, []);
+
+      const authenticate = useCallback(async (mode, payload) => {
+        const data = await api(`/auth/${mode}`, { method: 'POST', body: JSON.stringify(payload) });
+        tokenStore.set(data.token);
+        setUser(data.user);
+        setModal(null);
+        return data.user;
+      }, []);
+
+      const logout = useCallback(() => {
+        tokenStore.set(null);
+        setUser(null);
+      }, []);
+
+      const value = useMemo(
+        () => ({ user, ready, modal, openAuth: setModal, closeAuth: () => setModal(null), authenticate, logout }),
+        [user, ready, modal, authenticate, logout]
+      );
+
+      return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    }
+
+    // ========================================
+    // 🎨 Design System Components
+    // ========================================
+    function Button({ variant = 'primary', size = 'md', disabled = false, className = '', children, ...props }) {
+      const variants = {
+        primary: 'bg-stone-900 text-white hover:bg-stone-700 focus-visible:ring-stone-900',
+        secondary: 'bg-white text-stone-700 ring-1 ring-inset ring-stone-300 hover:bg-stone-100 focus-visible:ring-stone-400',
+        danger: 'bg-red-600 text-white hover:bg-red-500 focus-visible:ring-red-600',
+        ghost: 'text-stone-600 hover:bg-stone-100 focus-visible:ring-stone-300',
+      };
+      const sizes = {
+        sm: 'px-3 py-1.5 text-sm',
+        md: 'px-4 py-2 text-sm',
+        lg: 'px-5 py-2.5 text-base',
+      };
+      return (
+        <button
+          disabled={disabled}
+          className={`inline-flex items-center justify-center gap-1.5 rounded-full font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 ${variants[variant]} ${sizes[size]} ${className}`}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function Textarea({ label, value, onChange, placeholder, error, disabled = false, maxLength, className = '', ...props }) {
+      const id = useMemo(() => `ta-${Math.random().toString(36).slice(2, 8)}`, []);
+      return (
+        <div className={className}>
+          {label && <label htmlFor={id} className="sr-only">{label}</label>}
+          <textarea
+            id={id}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            maxLength={maxLength}
+            aria-invalid={!!error}
+            className="block w-full resize-none rounded-xl border-0 bg-stone-50 px-4 py-3 text-[15px] leading-relaxed text-stone-800 placeholder:text-stone-400 ring-1 ring-inset ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-800 disabled:opacity-60"
+            {...props}
+          />
+          {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+        </div>
+      );
+    }
+
+    // 모달이 열릴 때 첫 칸에 포커스를 주려고 ref 를 그대로 넘긴다
+    const Input = React.forwardRef(function Input(
+      { label, type = 'text', value, onChange, placeholder, hint, disabled = false, className = '', ...props },
+      ref
+    ) {
+      const id = useMemo(() => `in-${Math.random().toString(36).slice(2, 8)}`, []);
+      return (
+        <div className={className}>
+          <label htmlFor={id} className="block text-sm font-semibold text-stone-700">{label}</label>
+          <input
+            id={id}
+            ref={ref}
+            type={type}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            disabled={disabled}
+            className="mt-1.5 block w-full rounded-xl border-0 bg-stone-50 px-4 py-2.5 text-[15px] text-stone-800 placeholder:text-stone-400 ring-1 ring-inset ring-stone-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-800 disabled:opacity-60"
+            {...props}
+          />
+          {hint && <p className="mt-1.5 text-xs text-stone-400">{hint}</p>}
+        </div>
+      );
+    });
+
+    function Card({ className = '', children, ...props }) {
+      return (
+        <div className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200/70 ${className}`} {...props}>
+          {children}
+        </div>
+      );
+    }
+
+    function Badge({ className = '', children }) {
+      return (
+        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${className}`}>
+          {children}
+        </span>
+      );
+    }
+
+    function Chip({ selected = false, activeClass = 'bg-stone-900 text-white ring-stone-900', idleClass = 'bg-white text-stone-600 ring-stone-200', className = '', children, ...props }) {
+      return (
+        <button
+          type="button"
+          aria-pressed={selected}
+          className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium ring-1 ring-inset transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-800 ${selected ? activeClass : idleClass} ${className}`}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    }
+
+    function SegmentedControl({ options, value, onChange, label }) {
+      return (
+        <div role="radiogroup" aria-label={label} className="inline-flex rounded-full bg-stone-200/70 p-1">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={value === opt.value}
+              onClick={() => onChange(opt.value)}
+              className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-800 ${value === opt.value ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Spinner({ className = '' }) {
+      return (
+        <span
+          role="status"
+          aria-label="불러오는 중"
+          className={`inline-block h-5 w-5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-800 ${className}`}
+        />
+      );
+    }
+
+    // ========================================
+    // 🧩 Common/Layout Components
+    // ========================================
+    function Header() {
+      const { user, openAuth, logout } = useAuth();
+      return (
+        <header className="pt-5 sm:pt-6">
+          <div className="flex min-h-[2.25rem] items-center justify-end gap-2">
+            {user ? (
+              <>
+                <span className="truncate text-sm text-stone-500">
+                  <span className="font-semibold text-stone-700">{user.nickname}</span> 님
+                </span>
+                <Button variant="ghost" size="sm" onClick={logout}>로그아웃</Button>
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => openAuth('login')}>로그인</Button>
+                <Button size="sm" onClick={() => openAuth('signup')}>회원가입</Button>
+              </>
+            )}
+          </div>
+
+          <div className="pb-6 pt-4 text-center sm:pt-6">
+            <p className="text-3xl" aria-hidden="true">🤫</p>
+            <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-stone-900 sm:text-4xl">속닥속닥</h1>
+            <p className="mt-2 text-sm text-stone-500 sm:text-base">
+              이름 없이 털어놓고, 누군가의 이야기에 조용히 공감해 주세요.
+            </p>
+          </div>
+        </header>
+      );
+    }
+
+    // Esc·바깥 클릭으로 닫히는 기본 모달
+    function Modal({ onClose, labelledBy, children }) {
+      useEffect(() => {
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKey);
+        // 모달 뒤의 목록이 같이 스크롤되지 않게 막는다
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+          window.removeEventListener('keydown', onKey);
+          document.body.style.overflow = prev;
+        };
+      }, [onClose]);
+
+      return (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-4 backdrop-blur-sm sm:items-center"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+          <div role="dialog" aria-modal="true" aria-labelledby={labelledBy} className="animate-fade-in w-full max-w-sm">
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function AuthModal() {
+      const { modal, closeAuth, openAuth, authenticate } = useAuth();
+      const isSignup = modal === 'signup';
+      const [form, setForm] = useState({ email: '', password: '', nickname: '' });
+      const [submitting, setSubmitting] = useState(false);
+      const [error, setError] = useState('');
+      const emailRef = useRef(null);
+
+      // 로그인 ↔ 회원가입 전환 때 이전 입력·에러가 남지 않게 한다
+      useEffect(() => {
+        setForm({ email: '', password: '', nickname: '' });
+        setError('');
+        if (modal) emailRef.current?.focus();
+      }, [modal]);
+
+      if (!modal) return null;
+
+      const set = (key) => (e) => { setForm((f) => ({ ...f, [key]: e.target.value })); setError(''); };
+
+      const submit = async (e) => {
+        e.preventDefault();
+        setSubmitting(true);
+        setError('');
+        try {
+          await authenticate(isSignup ? 'signup' : 'login', {
+            email: form.email.trim(),
+            password: form.password,
+            ...(isSignup ? { nickname: form.nickname.trim() } : {}),
+          });
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <Modal onClose={closeAuth} labelledBy="auth-title">
+          <Card className="p-6">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="auth-title" className="text-xl font-bold text-stone-900">
+                  {isSignup ? '회원가입' : '로그인'}
+                </h2>
+                <p className="mt-1 text-sm text-stone-500">
+                  글쓰기와 공감에만 필요해요. 닉네임은 게시글에 표시되지 않습니다.
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={closeAuth} aria-label="닫기" className="!px-2">✕</Button>
+            </div>
+
+            <form onSubmit={submit} className="mt-5 space-y-4">
+              <Input
+                label="이메일"
+                type="email"
+                ref={emailRef}
+                value={form.email}
+                onChange={set('email')}
+                placeholder="you@example.com"
+                autoComplete="email"
+                disabled={submitting}
+                required
+              />
+              {isSignup && (
+                <Input
+                  label="닉네임"
+                  value={form.nickname}
+                  onChange={set('nickname')}
+                  placeholder="속닥이"
+                  maxLength={20}
+                  autoComplete="nickname"
+                  disabled={submitting}
+                  required
+                />
+              )}
+              <Input
+                label="비밀번호"
+                type="password"
+                value={form.password}
+                onChange={set('password')}
+                placeholder={isSignup ? '8자 이상' : '비밀번호'}
+                autoComplete={isSignup ? 'new-password' : 'current-password'}
+                hint={isSignup ? '8자 이상으로 정해 주세요.' : null}
+                disabled={submitting}
+                required
+              />
+
+              {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+
+              <Button type="submit" size="lg" disabled={submitting} className="w-full">
+                {submitting
+                  ? <Spinner className="h-4 w-4 border-stone-500 border-t-white" />
+                  : (isSignup ? '가입하고 시작하기' : '로그인')}
+              </Button>
+            </form>
+
+            <p className="mt-4 text-center text-sm text-stone-500">
+              {isSignup ? '이미 계정이 있나요?' : '아직 계정이 없나요?'}{' '}
+              <button
+                type="button"
+                onClick={() => openAuth(isSignup ? 'login' : 'signup')}
+                className="font-semibold text-stone-800 underline underline-offset-2 hover:text-stone-600"
+              >
+                {isSignup ? '로그인' : '회원가입'}
+              </button>
+            </p>
+          </Card>
+        </Modal>
+      );
+    }
+
+    function Footer() {
+      return (
+        <footer className="py-10 text-center text-xs text-stone-400">
+          모든 글은 익명으로 저장됩니다 · 서로에게 따뜻한 말을 남겨 주세요
+        </footer>
+      );
+    }
+
+    function HeartIcon({ filled }) {
+      return (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.5s-7.5-4.6-9.3-9.6C1.6 7.6 3.9 4.5 7.2 4.5c2 0 3.6 1.1 4.8 2.8 1.2-1.7 2.8-2.8 4.8-2.8 3.3 0 5.6 3.1 4.5 6.4-1.8 5-9.3 9.6-9.3 9.6z" />
+        </svg>
+      );
+    }
+
+    // ========================================
+    // 📄 Page Components
+    // ========================================
+    // 비로그인일 때 글쓰기 자리에 대신 보여 주는 안내
+    function LoginPrompt() {
+      const { openAuth } = useAuth();
+      return (
+        <Card className="flex flex-col items-center gap-3 py-8 text-center">
+          <p className="text-2xl" aria-hidden="true">✍️</p>
+          <div>
+            <p className="font-semibold text-stone-800">이야기를 남기려면 로그인해 주세요</p>
+            <p className="mt-1 text-sm text-stone-500">
+              글은 여전히 익명으로 올라갑니다. 계정은 내 글을 관리하려는 용도예요.
+            </p>
+          </div>
+          <div className="mt-1 flex gap-2">
+            <Button onClick={() => openAuth('login')}>로그인</Button>
+            <Button variant="secondary" onClick={() => openAuth('signup')}>회원가입</Button>
+          </div>
+        </Card>
+      );
+    }
+
+    function ComposeForm({ onCreated }) {
+      const { logout, openAuth } = useAuth();
+      const [category, setCategory] = useState('');
+      const [content, setContent] = useState('');
+      const [submitting, setSubmitting] = useState(false);
+      const [error, setError] = useState('');
+
+      const trimmed = content.trim();
+      const canSubmit = !!category && !!trimmed && !submitting;
+
+      const submit = async (e) => {
+        e?.preventDefault();
+        if (!category) return setError('카테고리를 선택해 주세요.');
+        if (!trimmed) return setError('내용을 입력해 주세요.');
+        setSubmitting(true);
+        setError('');
+        try {
+          const post = await api('/posts', {
+            method: 'POST',
+            body: JSON.stringify({ category, content: trimmed }),
+          });
+          setContent('');
+          setCategory('');
+          onCreated(post);
+        } catch (err) {
+          setError(err.message);
+          // 토큰이 만료된 채로 글을 쓰려 한 경우
+          if (err.status === 401) { logout(); openAuth('login'); }
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <Card className="p-4 sm:p-5">
+          <form onSubmit={submit}>
+            <fieldset>
+              <legend className="mb-3 text-sm font-semibold text-stone-700">어떤 이야기인가요?</legend>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map((c) => (
+                  <Chip
+                    key={c.value}
+                    selected={category === c.value}
+                    activeClass={c.active}
+                    idleClass={c.chip}
+                    onClick={() => { setCategory(c.value); setError(''); }}
+                  >
+                    <span aria-hidden="true">{c.emoji}</span>{c.value}
+                  </Chip>
+                ))}
+              </div>
+            </fieldset>
+
+            <Textarea
+              label="내용"
+              className="mt-4"
+              rows={4}
+              value={content}
+              maxLength={CONTENT_MAX}
+              onChange={(e) => { setContent(e.target.value); setError(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(e); }}
+              placeholder="아무도 모르게 하고 싶은 이야기를 적어 보세요."
+              disabled={submitting}
+              error={error}
+            />
+
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className={`text-xs tabular-nums ${content.length >= CONTENT_MAX ? 'text-red-500' : 'text-stone-400'}`}>
+                {content.length} / {CONTENT_MAX}
+                <span className="ml-2 hidden sm:inline">· Ctrl+Enter 로 등록</span>
+              </span>
+              <Button type="submit" disabled={!canSubmit}>
+                {submitting ? <Spinner className="h-4 w-4 border-stone-500 border-t-white" /> : '익명으로 올리기'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      );
+    }
+
+    function PostCard({ post, onLike, onDelete, isNew }) {
+      const meta = CATEGORY_BY_VALUE[post.category] || CATEGORY_BY_VALUE['기타'];
+      const [popping, setPopping] = useState(false);
+      const [confirming, setConfirming] = useState(false);
+
+      const handleLike = () => {
+        if (post.liked) return;
+        setPopping(true);
+        onLike(post.id);
+      };
+
+      return (
+        <Card className={`animate-fade-in ${isNew ? 'ring-2 ring-stone-800' : ''}`}>
+          <article>
+            <div className="flex items-center justify-between gap-2">
+              <Badge className={meta.chip}>
+                <span aria-hidden="true">{meta.emoji}</span>{post.category}
+              </Badge>
+              <div className="flex items-center gap-2">
+                {post.mine && <Badge className="bg-stone-100 text-stone-600 ring-stone-200">내 글</Badge>}
+                <time dateTime={post.createdAt} className="text-xs text-stone-400" title={new Date(post.createdAt).toLocaleString('ko-KR')}>
+                  {timeAgo(post.createdAt)}
+                </time>
+              </div>
+            </div>
+
+            <p className="mt-3 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-stone-800">
+              {post.content}
+            </p>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              {post.mine && (
+                confirming ? (
+                  <span className="flex items-center gap-1.5 text-sm text-stone-500">
+                    <span className="hidden sm:inline">삭제할까요?</span>
+                    <Button variant="danger" size="sm" onClick={() => onDelete(post.id)}>삭제</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>취소</Button>
+                  </span>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}>삭제</Button>
+                )
+              )}
+              <button
+                type="button"
+                onClick={handleLike}
+                disabled={post.liked}
+                aria-pressed={post.liked}
+                aria-label={post.liked ? `공감함, 공감 ${post.likes}개` : `공감하기, 현재 ${post.likes}개`}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ring-1 ring-inset transition focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${post.liked ? 'cursor-default bg-rose-50 text-rose-600 ring-rose-200' : 'bg-white text-stone-500 ring-stone-200 hover:bg-rose-50 hover:text-rose-600 hover:ring-rose-200'}`}
+              >
+                <span className={popping ? 'animate-pop' : ''} onAnimationEnd={() => setPopping(false)}>
+                  <HeartIcon filled={post.liked} />
+                </span>
+                <span>공감</span>
+                <span className="tabular-nums">{post.likes}</span>
+              </button>
+            </div>
+          </article>
+        </Card>
+      );
+    }
+
+    function BoardPage() {
+      const { user, ready, openAuth, logout } = useAuth();
+      const [sort, setSort] = useState('latest');
+      const [filter, setFilter] = useState(''); // '' | 카테고리 | 'mine'
+      const [posts, setPosts] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+      const [notice, setNotice] = useState('');
+      const [newId, setNewId] = useState(null);
+      const requestRef = useRef(0);
+
+      // 토큰이 만료된 채로 요청하면 로그아웃시키고 로그인 창을 띄운다
+      const handleExpired = useCallback(() => {
+        logout();
+        openAuth('login');
+      }, [logout, openAuth]);
+
+      const load = useCallback(async () => {
+        const reqId = ++requestRef.current;
+        setLoading(true);
+        setError('');
+        try {
+          const params = new URLSearchParams({ sort });
+          if (filter === 'mine') params.set('mine', '1');
+          else if (filter) params.set('category', filter);
+          const data = await api(`/posts?${params}`);
+          if (reqId === requestRef.current) setPosts(data);
+        } catch (err) {
+          if (reqId === requestRef.current) setError(err.message);
+        } finally {
+          if (reqId === requestRef.current) setLoading(false);
+        }
+      }, [sort, filter]);
+
+      // 로그인 상태가 확인된 뒤에 불러온다 (토큰 없이 먼저 부르면 liked·mine 이 비어 온다).
+      // user 가 바뀌면 다시 불러 공감·내 글 표시를 맞춘다.
+      useEffect(() => { if (ready) load(); }, [ready, load, user]);
+
+      // 로그아웃하면 '내 글' 필터에 머무를 수 없다
+      useEffect(() => {
+        if (!user && filter === 'mine') setFilter('');
+      }, [user, filter]);
+
+      useEffect(() => {
+        if (!newId) return;
+        const t = setTimeout(() => setNewId(null), 3000);
+        return () => clearTimeout(t);
+      }, [newId]);
+
+      useEffect(() => {
+        if (!notice) return;
+        const t = setTimeout(() => setNotice(''), 2500);
+        return () => clearTimeout(t);
+      }, [notice]);
+
+      const handleCreated = (post) => {
+        setNotice('익명으로 등록했어요.');
+        setNewId(post.id);
+        // 새 글이 바로 보이도록 최신순 · 전체 보기로 전환한다
+        if (sort !== 'latest' || filter) {
+          setSort('latest');
+          setFilter('');
+        } else {
+          setPosts((prev) => [post, ...prev]);
+        }
+      };
+
+      const handleLike = async (id) => {
+        if (!user) return openAuth('login');
+
+        // 낙관적 업데이트 후 서버 값으로 맞춘다
+        setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, liked: true, likes: p.likes + 1 } : p)));
+        try {
+          const updated = await api(`/posts/${id}/like`, { method: 'POST' });
+          setPosts((prev) => prev.map((p) => (p.id === id ? updated : p)));
+        } catch (err) {
+          setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, liked: false, likes: Math.max(0, p.likes - 1) } : p)));
+          setNotice(err.message);
+          if (err.status === 401) handleExpired();
+        }
+      };
+
+      const handleDelete = async (id) => {
+        const removed = posts.find((p) => p.id === id);
+        setPosts((prev) => prev.filter((p) => p.id !== id));
+        try {
+          await api(`/posts/${id}`, { method: 'DELETE' });
+          setNotice('글을 삭제했어요.');
+        } catch (err) {
+          if (removed) load(); // 지워지지 않았으므로 서버 상태로 되돌린다
+          setNotice(err.message);
+          if (err.status === 401) handleExpired();
+        }
+      };
+
+      return (
+        <main className="mx-auto w-full max-w-2xl px-4 sm:px-6">
+          <Header />
+
+          {user ? <ComposeForm onCreated={handleCreated} /> : <LoginPrompt />}
+
+          <section aria-labelledby="list-title" className="mt-10">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="list-title" className="text-lg font-bold text-stone-900">
+                모두의 이야기 {!loading && !error && <span className="ml-1 text-sm font-medium text-stone-400">{posts.length}</span>}
+              </h2>
+              <div className="flex items-center gap-2">
+                <SegmentedControl
+                  label="정렬"
+                  value={sort}
+                  onChange={setSort}
+                  options={[{ value: 'latest', label: '최신순' }, { value: 'likes', label: '공감순' }]}
+                />
+                <Button variant="ghost" size="sm" onClick={load} disabled={loading} aria-label="새로고침" className="h-9 w-9 !px-0">
+                  <svg viewBox="0 0 24 24" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.1 15a7.5 7.5 0 0 0 13.4 2M18.9 9A7.5 7.5 0 0 0 5.5 7" />
+                  </svg>
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="카테고리 필터">
+              <Chip selected={filter === ''} onClick={() => setFilter('')}>전체</Chip>
+              {CATEGORIES.map((c) => (
+                <Chip key={c.value} selected={filter === c.value} activeClass={c.active} onClick={() => setFilter(c.value)}>
+                  <span aria-hidden="true">{c.emoji}</span>{c.value}
+                </Chip>
+              ))}
+              {user && (
+                <Chip
+                  selected={filter === 'mine'}
+                  onClick={() => setFilter('mine')}
+                  className="ml-auto"
+                >
+                  <span aria-hidden="true">📌</span>내 글
+                </Chip>
+              )}
+            </div>
+
+            <div className="mt-5 space-y-3" aria-live="polite" aria-busy={loading}>
+              {loading && posts.length === 0 && (
+                <div className="flex justify-center py-16"><Spinner /></div>
+              )}
+
+              {error && (
+                <Card className="py-10 text-center">
+                  <p className="text-2xl" aria-hidden="true">😵</p>
+                  <p className="mt-2 font-semibold text-stone-800">글을 불러오지 못했어요</p>
+                  <p className="mt-1 text-sm text-stone-500">{error}</p>
+                  <Button variant="secondary" size="sm" className="mt-4" onClick={load}>다시 시도</Button>
+                </Card>
+              )}
+
+              {!loading && !error && posts.length === 0 && (
+                <Card className="py-14 text-center">
+                  <p className="text-3xl" aria-hidden="true">🍃</p>
+                  <p className="mt-3 font-semibold text-stone-800">
+                    {filter === 'mine'
+                      ? '아직 내가 쓴 글이 없어요'
+                      : filter ? `아직 '${filter}' 이야기가 없어요` : '아직 올라온 이야기가 없어요'}
+                  </p>
+                  <p className="mt-1 text-sm text-stone-500">첫 번째 이야기를 남겨 보세요.</p>
+                </Card>
+              )}
+
+              {!error && posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onLike={handleLike}
+                  onDelete={handleDelete}
+                  isNew={post.id === newId}
+                />
+              ))}
+            </div>
+          </section>
+
+          <Footer />
+
+          {notice && (
+            <div role="status" className="fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+              <div className="animate-fade-in rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white shadow-lg">
+                {notice}
+              </div>
+            </div>
+          )}
+        </main>
+      );
+    }
+
+    // ========================================
+    // 🚀 App Component
+    // ========================================
+    function App() {
+      return (
+        <AuthProvider>
+          <BoardPage />
+          <AuthModal />
+        </AuthProvider>
+      );
+    }
+
+    // ========================================
+    // Rendering
+    // ========================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

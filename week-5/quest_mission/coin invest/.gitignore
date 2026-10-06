@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.local
+.vercel
+
+# 투자 에이전트 임시 파일
+reports/video/
+reports/order-body.json
+
+.vercel
+.env*
+!.env.example

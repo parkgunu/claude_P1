@@ -1,0 +1,1857 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OFFDAY — 오늘 하루, 잘 고른 것들</title>
+  <meta name="description" content="직접 써 보고 남긴 30개 상품. 유행보다 오래 쓰는 쪽으로 골랐습니다.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Ctext x='16' y='23' font-family='Archivo,Arial,sans-serif' font-size='20' font-weight='800' fill='%23fff' text-anchor='middle'%3EO%3C/text%3E%3C/svg%3E">
+
+  <!-- ⚠️ 모든 CDN 은 버전을 고정한다. 미고정 시 @babel/standalone 이 8.x 로 올라가 text/babel 변환이 깨진다. -->
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink:   '#000000', // 본문과 주요 액션
+            paper: '#FFFFFF',
+            field: '#F3F3F1', // 이미지 뒤 바탕
+            line:  '#E4E4E1', // 헤어라인
+            mute:  '#76766E', // 보조 텍스트
+            sale:  '#FF2D1F', // 할인율 숫자에만
+            live:  '#1C1CFF', // '담김' 상태 표시에만
+          },
+          fontFamily: {
+            sans: ['Pretendard Variable', 'Pretendard', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    /* 숫자는 이 쇼핑몰의 목소리다. 가격·수량·합계는 전부 확장 그로테스크로 세운다. */
+    .num {
+      font-family: 'Archivo', 'Pretendard Variable', sans-serif;
+      font-variation-settings: 'wdth' 112;
+      font-feature-settings: 'tnum' 1;
+      letter-spacing: -0.015em;
+    }
+    .wordmark {
+      font-family: 'Archivo', 'Pretendard Variable', sans-serif;
+      font-variation-settings: 'wdth' 125;
+      font-weight: 800;
+      letter-spacing: -0.045em;
+    }
+    /* 국문 헤드라인은 자간을 조여야 무게가 산다 */
+    .headline { letter-spacing: -0.045em; word-break: keep-all; }
+
+    body { background: #fff; color: #000; -webkit-font-smoothing: antialiased; }
+    ::selection { background: #000; color: #fff; }
+
+    /* 키보드 사용자에게만 링이 보이게 한다 */
+    :focus-visible { outline: 2px solid #000; outline-offset: 2px; }
+
+    /* 가로 스크롤 영역의 스크롤바를 숨긴다 */
+    .no-bar { scrollbar-width: none; -ms-overflow-style: none; }
+    .no-bar::-webkit-scrollbar { display: none; }
+
+    /* 페이지 진입 시 히어로 이미지 한 번만 올라온다 (유일한 자동 모션) */
+    @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+    .rise { animation: rise .7s cubic-bezier(.16,1,.3,1) both; }
+
+    @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    .toast-in { animation: toast-in .24s cubic-bezier(.16,1,.3,1) both; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin .8s linear infinite; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+    }
+  </style>
+</head>
+<body class="font-sans">
+  <div id="root"></div>
+
+  <script type="text/babel">
+// ========================================
+// React Hooks
+// ========================================
+const { useState, useEffect, useRef, useMemo, useCallback, useContext, createContext } = React;
+
+const API_BASE_URL = '/api';
+const TOKEN_KEY = 'offday_token';
+const GUEST_CART_KEY = 'offday_guest_cart';
+const MAX_QTY = 20;
+
+// 비회원 장바구니가 비었을 때 서버에 묻지 않고 바로 쓰는 값
+const EMPTY_CART = {
+  items: [], count: 0, totalQty: 0,
+  subtotal: 0, discount: 0, shipping: 0, total: 0,
+  freeShippingThreshold: 50000,
+};
+
+// ========================================
+// 🛠 Utilities
+// ========================================
+
+const won = (n) => Number(n || 0).toLocaleString('ko-KR');
+
+// 정가 대비 할인율. 0이면 배지를 숨긴다.
+const discountRate = (price, listPrice) =>
+  listPrice > price ? Math.round((1 - price / listPrice) * 100) : 0;
+
+const formatDate = (iso) =>
+  new Date(iso).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+
+const readToken = () => {
+  try { return localStorage.getItem(TOKEN_KEY); } catch (_e) { return null; }
+};
+const writeToken = (token) => {
+  try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch (_e) {}
+};
+
+// 로그인하지 않은 사람의 장바구니는 이 브라우저에만 [{productId, qty}] 로 남는다.
+// 금액은 저장하지 않고 필요할 때마다 서버에 다시 물어본다.
+const readGuestLines = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GUEST_CART_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((l) => Number.isInteger(l?.productId) && l.productId > 0) : [];
+  } catch (_e) {
+    return [];
+  }
+};
+const writeGuestLines = (lines) => {
+  try {
+    lines.length ? localStorage.setItem(GUEST_CART_KEY, JSON.stringify(lines)) : localStorage.removeItem(GUEST_CART_KEY);
+  } catch (_e) {}
+};
+
+// 서버 응답은 항상 { success, message, ... } 형태다. 실패면 message 를 담아 throw 한다.
+async function api(path, { method = 'GET', body, auth = false } = {}) {
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (auth) {
+    const token = readToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (_e) {
+    throw new Error('서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  }
+
+  let data = null;
+  try { data = await res.json(); } catch (_e) {}
+
+  if (!res.ok || !data || data.success === false) {
+    const err = new Error((data && data.message) || '요청을 처리하지 못했습니다.');
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+// ========================================
+// 🎨 Design System
+// ========================================
+
+function Button({ variant = 'primary', size = 'md', className = '', disabled, loading, children, ...rest }) {
+  const base = 'inline-flex items-center justify-center gap-2 font-medium transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed';
+  const variants = {
+    primary:   'bg-ink text-paper hover:bg-neutral-700',
+    secondary: 'bg-paper text-ink border border-ink hover:bg-field',
+    quiet:     'bg-field text-ink hover:bg-line',
+    ghost:     'bg-transparent text-mute hover:text-ink',
+  };
+  const sizes = { sm: 'h-9 px-3 text-[13px]', md: 'h-12 px-6 text-[15px]', lg: 'h-14 px-8 text-base' };
+
+  return (
+    <button
+      className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+      disabled={disabled || loading}
+      {...rest}
+    >
+      {loading && <span className="spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" aria-hidden="true" />}
+      {children}
+    </button>
+  );
+}
+
+function Input({ label, error, hint, className = '', id, ...rest }) {
+  const autoId = useRef(`in-${Math.random().toString(36).slice(2, 8)}`).current;
+  const inputId = id || autoId;
+
+  return (
+    <div className={className}>
+      {label && (
+        <label htmlFor={inputId} className="block text-[13px] text-mute mb-2">{label}</label>
+      )}
+      <input
+        id={inputId}
+        className={`w-full h-12 px-4 bg-paper border text-[15px] placeholder:text-neutral-400 focus:outline-none focus:border-ink transition-colors ${error ? 'border-sale' : 'border-line'}`}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={error ? `${inputId}-err` : undefined}
+        {...rest}
+      />
+      {error && <p id={`${inputId}-err`} className="mt-2 text-[13px] text-sale">{error}</p>}
+      {!error && hint && <p className="mt-2 text-[13px] text-mute">{hint}</p>}
+    </div>
+  );
+}
+
+// 상품 이미지 위 작은 사각 태그. 값이 없으면 아무것도 그리지 않는다.
+function Badge({ children }) {
+  if (!children) return null;
+  const tone = children === '단독' ? 'bg-live text-paper' : 'bg-ink text-paper';
+  return (
+    <span className={`${tone} px-2 py-1 text-[11px] font-semibold tracking-tight`}>{children}</span>
+  );
+}
+
+// 화면 가운데 뜨는 확인 창. Esc 로 닫히고, 열려 있는 동안 뒤 배경은 스크롤되지 않는다.
+function Modal({ isOpen, onClose, title, children, actions }) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/45" onClick={onClose} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="relative bg-paper w-full max-w-[420px] p-7 sm:p-8"
+      >
+        <h2 className="headline text-[20px] font-bold leading-snug">{title}</h2>
+        {children && <div className="mt-3 text-[14px] text-mute leading-relaxed break-keep">{children}</div>}
+        <div className="mt-7 flex flex-col sm:flex-row gap-2">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
+function Spinner({ label = '불러오는 중' }) {
+  return (
+    <div className="py-24 flex flex-col items-center gap-3 text-mute" role="status">
+      <span className="spin w-6 h-6 border-2 border-line border-t-ink rounded-full" aria-hidden="true" />
+      <span className="text-[13px]">{label}</span>
+    </div>
+  );
+}
+
+// 비어 있는 화면은 다음에 뭘 할지 알려 주는 자리다
+function EmptyState({ title, body, action }) {
+  return (
+    <div className="py-24 text-center">
+      <p className="text-lg font-semibold headline">{title}</p>
+      {body && <p className="mt-2 text-[14px] text-mute">{body}</p>}
+      {action && <div className="mt-7 flex justify-center">{action}</div>}
+    </div>
+  );
+}
+
+function ErrorNotice({ message, onRetry }) {
+  return (
+    <div className="py-20 text-center">
+      <p className="text-[15px] font-medium">{message}</p>
+      {onRetry && (
+        <Button variant="secondary" size="sm" className="mt-5" onClick={onRetry}>다시 불러오기</Button>
+      )}
+    </div>
+  );
+}
+
+// 가격 한 줄: 할인율 → 판매가 → 정가(취소선)
+function Price({ price, listPrice, size = 'md' }) {
+  const rate = discountRate(price, listPrice);
+  const scale = {
+    sm: { main: 'text-[15px]', rate: 'text-[15px]', unit: 'text-[12px]', old: 'text-[12px]' },
+    md: { main: 'text-[17px]', rate: 'text-[17px]', unit: 'text-[13px]', old: 'text-[13px]' },
+    lg: { main: 'text-[30px]', rate: 'text-[30px]', unit: 'text-[16px]', old: 'text-[14px]' },
+  }[size];
+
+  return (
+    <div className="flex items-baseline gap-2 flex-wrap">
+      {rate > 0 && (
+        <span className={`num font-bold text-sale ${scale.rate}`}>{rate}%</span>
+      )}
+      <span className={`num font-bold ${scale.main}`}>
+        {won(price)}<span className={`font-sans font-medium ml-0.5 ${scale.unit}`}>원</span>
+      </span>
+      {rate > 0 && (
+        // 좁은 화면의 2열 그리드에서는 정가까지 넣으면 줄이 넘어가 카드 높이가 들쭉날쭉해진다
+        <span className={`num text-mute line-through ${scale.old} ${size === 'sm' ? 'hidden min-[420px]:inline' : ''}`}>
+          {won(listPrice)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ========================================
+// 🔀 Router (해시 기반)
+// ========================================
+
+const RouterContext = createContext(null);
+
+function matchRoute(pattern, path) {
+  const p = pattern.split('/').filter(Boolean);
+  const c = path.split('/').filter(Boolean);
+  if (p.length !== c.length) return null;
+
+  const params = {};
+  for (let i = 0; i < p.length; i++) {
+    if (p[i].startsWith(':')) params[p[i].slice(1)] = decodeURIComponent(c[i]);
+    else if (p[i] !== c[i]) return null;
+  }
+  return params;
+}
+
+const currentPath = () => window.location.hash.replace(/^#/, '') || '/';
+
+function Router({ children }) {
+  const [path, setPath] = useState(currentPath);
+
+  useEffect(() => {
+    const onChange = () => setPath(currentPath());
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+  }, []);
+
+  // 페이지가 바뀌면 위에서부터 읽게 한다
+  useEffect(() => { window.scrollTo(0, 0); }, [path]);
+
+  const navigate = useCallback((to) => {
+    if (currentPath() === to) return;
+    window.location.hash = to;
+  }, []);
+
+  return (
+    <RouterContext.Provider value={{ path, navigate }}>{children}</RouterContext.Provider>
+  );
+}
+
+const useRouter = () => useContext(RouterContext);
+
+function Routes({ children, notFound }) {
+  const { path } = useRouter();
+  const routes = React.Children.toArray(children);
+
+  for (const route of routes) {
+    const params = matchRoute(route.props.path, path);
+    if (params) return React.cloneElement(route.props.element, { params });
+  }
+  return notFound || null;
+}
+
+function Route() { return null; }
+
+function Link({ to, className = '', children, ...rest }) {
+  const { navigate } = useRouter();
+  return (
+    <a
+      href={`#${to}`}
+      className={className}
+      onClick={(e) => { e.preventDefault(); navigate(to); }}
+      {...rest}
+    >
+      {children}
+    </a>
+  );
+}
+
+// ========================================
+// 🔔 Toast
+// ========================================
+
+const ToastContext = createContext(null);
+const useToast = () => useContext(ToastContext);
+
+function ToastProvider({ children }) {
+  const [toast, setToast] = useState(null);
+  const timer = useRef(null);
+
+  const show = useCallback((message, options = {}) => {
+    clearTimeout(timer.current);
+    setToast({ message, ...options, key: Date.now() });
+    timer.current = setTimeout(() => setToast(null), options.duration || 3200);
+  }, []);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return (
+    <ToastContext.Provider value={show}>
+      {children}
+      <div className="fixed left-1/2 bottom-6 z-50 px-4 w-full max-w-md pointer-events-none" style={{ transform: 'translateX(-50%)' }}>
+        {toast && (
+          <div
+            key={toast.key}
+            role="status"
+            aria-live="polite"
+            className="toast-in pointer-events-auto flex items-center justify-between gap-4 bg-ink text-paper px-5 py-4 shadow-lg"
+          >
+            <span className="text-[14px]">{toast.message}</span>
+            {toast.actionLabel && (
+              <button
+                className="text-[13px] font-semibold underline underline-offset-4 shrink-0"
+                onClick={() => { setToast(null); toast.onAction && toast.onAction(); }}
+              >
+                {toast.actionLabel}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+// ========================================
+// 🔐 Auth + 🛒 Cart 상태
+// ========================================
+
+const ShopContext = createContext(null);
+const useShop = () => useContext(ShopContext);
+
+function ShopProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [cart, setCart] = useState(null);
+
+  // 새로고침해도 토큰이 살아 있으면 로그인 상태를 되살린다
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!readToken()) { setAuthReady(true); return; }
+      try {
+        const data = await api('/auth/me', { auth: true });
+        if (alive) setUser(data.user);
+      } catch (_e) {
+        writeToken(null);
+      } finally {
+        if (alive) setAuthReady(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // 비회원 장바구니는 브라우저에 있고, 금액만 서버에 물어본다
+  const refreshGuestCart = useCallback(async () => {
+    const lines = readGuestLines();
+    if (lines.length === 0) { setCart(EMPTY_CART); return EMPTY_CART; }
+    try {
+      const data = await api('/cart/quote', { method: 'POST', body: { items: lines } });
+      setCart(data.cart);
+      return data.cart;
+    } catch (_e) {
+      setCart(EMPTY_CART);
+      return EMPTY_CART;
+    }
+  }, []);
+
+  // 로그인 여부가 정해지면 그에 맞는 장바구니를 불러온다
+  useEffect(() => {
+    if (!authReady) return;
+    let alive = true;
+
+    if (user) {
+      api('/cart', { auth: true })
+        .then((d) => { if (alive) setCart(d.cart); })
+        .catch(() => {});
+    } else {
+      refreshGuestCart();
+    }
+    return () => { alive = false; };
+  }, [user, authReady, refreshGuestCart]);
+
+  // 로그인/가입 직후, 비회원으로 담아 둔 상품을 계정 장바구니로 옮긴다
+  const signIn = useCallback(async (path, payload) => {
+    const data = await api(path, { method: 'POST', body: payload });
+    writeToken(data.token);
+
+    const lines = readGuestLines();
+    if (lines.length > 0) {
+      try {
+        const merged = await api('/cart/merge', { method: 'POST', body: { items: lines }, auth: true });
+        setCart(merged.cart);
+      } catch (_e) {
+        // 옮기지 못해도 로그인 자체는 막지 않는다
+      }
+      writeGuestLines([]);
+    }
+
+    setUser(data.user);
+    return data.user;
+  }, []);
+
+  const login  = useCallback((email, password)       => signIn('/auth/login',  { email, password }), [signIn]);
+  const signup = useCallback((email, password, name) => signIn('/auth/signup', { email, password, name }), [signIn]);
+
+  const logout = useCallback(() => {
+    writeToken(null);
+    setUser(null);
+    setCart(EMPTY_CART);
+  }, []);
+
+  // 회원은 서버 장바구니를, 비회원은 브라우저에 있는 목록을 고친다
+  const cartAction = useCallback(async (path, options) => {
+    const data = await api(path, { ...options, auth: true });
+    setCart(data.cart);
+    return data;
+  }, []);
+
+  const editGuestLines = useCallback(async (edit) => {
+    writeGuestLines(edit(readGuestLines()));
+    return { cart: await refreshGuestCart() };
+  }, [refreshGuestCart]);
+
+  const addToCart = useCallback((productId, qty = 1) => {
+    if (user) return cartAction('/cart', { method: 'POST', body: { productId, qty } });
+    return editGuestLines((lines) => {
+      const found = lines.find((l) => l.productId === productId);
+      // 이미 담긴 상품이면 수량을 더한다 (서버 동작과 맞춘다)
+      if (found) found.qty = Math.min(MAX_QTY, found.qty + qty);
+      else lines.unshift({ productId, qty: Math.min(MAX_QTY, qty) });
+      return lines;
+    });
+  }, [user, cartAction, editGuestLines]);
+
+  const updateQty = useCallback((productId, qty) => {
+    if (user) return cartAction(`/cart/${productId}`, { method: 'PATCH', body: { qty } });
+    return editGuestLines((lines) =>
+      lines.map((l) => (l.productId === productId ? { ...l, qty: Math.min(MAX_QTY, Math.max(1, qty)) } : l))
+    );
+  }, [user, cartAction, editGuestLines]);
+
+  const removeFromCart = useCallback((productId) => {
+    if (user) return cartAction(`/cart/${productId}`, { method: 'DELETE' });
+    return editGuestLines((lines) => lines.filter((l) => l.productId !== productId));
+  }, [user, cartAction, editGuestLines]);
+
+  const clearCart = useCallback(() => {
+    if (user) return cartAction('/cart', { method: 'DELETE' });
+    return editGuestLines(() => []);
+  }, [user, cartAction, editGuestLines]);
+
+  const placeOrder = useCallback(async (buyer) => {
+    if (user) {
+      const data = await api('/orders', { method: 'POST', body: { buyer }, auth: true });
+      setCart(data.cart);
+      return data.order;
+    }
+    const data = await api('/orders/guest', { method: 'POST', body: { items: readGuestLines(), buyer } });
+    writeGuestLines([]);
+    await refreshGuestCart();
+    return data.order;
+  }, [user, refreshGuestCart]);
+
+  // 장바구니에 담긴 상품 id 집합 — 카드에서 '담김'을 표시할 때 쓴다
+  const inCart = useMemo(() => {
+    const map = new Map();
+    (cart?.items || []).forEach((it) => map.set(it.product.id, it.qty));
+    return map;
+  }, [cart]);
+
+  const value = {
+    user, authReady, cart, inCart,
+    login, signup, logout,
+    addToCart, updateQty, removeFromCart, clearCart, placeOrder,
+  };
+
+  return <ShopContext.Provider value={value}>{children}</ShopContext.Provider>;
+}
+
+// 로그인 뒤 원래 보던 화면으로 돌려보내기 위한 임시 저장소
+const afterLogin = {
+  to: null,
+  set(path) { this.to = path; },
+  take() { const t = this.to; this.to = null; return t; },
+};
+
+// ========================================
+// 🧩 공통 컴포넌트
+// ========================================
+
+function IconCart({ className = 'w-5 h-5' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d="M4 6h16l-1.4 10.5a2 2 0 0 1-2 1.75H7.4a2 2 0 0 1-2-1.75L4 6Z" strokeLinejoin="round" />
+      <path d="M8.5 6V4.8a3.5 3.5 0 0 1 7 0V6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconSearch({ className = 'w-5 h-5' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m16 16 4.5 4.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function Stars({ rating, count, className = '' }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-[12px] text-mute ${className}`}>
+      <svg className="w-3.5 h-3.5 text-ink" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path d="M10 1.8l2.4 5 5.4.8-3.9 3.8.9 5.4-4.8-2.6-4.8 2.6.9-5.4L2.2 7.6l5.4-.8 2.4-5Z" />
+      </svg>
+      <span className="num font-semibold text-ink">{rating.toFixed(1)}</span>
+      {count > 0 && <span className="num">({won(count)})</span>}
+    </span>
+  );
+}
+
+function Header() {
+  const { user, cart, logout } = useShop();
+  const { navigate, path } = useRouter();
+  const toast = useToast();
+  const count = cart?.totalQty || 0;
+
+  return (
+    <header className="sticky top-0 z-40 bg-paper">
+      <div className="bg-ink text-paper text-center text-[11px] sm:text-[12px] py-2 px-4">
+        5만원 이상 무료배송 · 오늘 주문하면 내일 도착합니다
+      </div>
+
+      <div className="border-b border-line">
+        <div className="max-w-[1320px] mx-auto px-4 sm:px-6 h-16 flex items-center gap-6">
+          <Link to="/" className="wordmark text-[26px] leading-none shrink-0" aria-label="OFFDAY 홈">OFFDAY</Link>
+
+          <nav className="hidden md:flex items-center gap-7 text-[14px] ml-2" aria-label="주요 메뉴">
+            <Link to="/" className={path === '/' ? 'font-semibold' : 'text-mute hover:text-ink transition-colors'}>스토어</Link>
+            <Link to="/orders" className={path === '/orders' ? 'font-semibold' : 'text-mute hover:text-ink transition-colors'}>주문내역</Link>
+          </nav>
+
+          <div className="flex-1" />
+
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Link
+              to="/cart"
+              className="relative w-10 h-10 flex items-center justify-center hover:bg-field transition-colors"
+              aria-label={`장바구니, 상품 ${count}개`}
+            >
+              <IconCart />
+              {/* 흰 테두리를 둘러 장바구니 아이콘 위에 얹혀도 숫자가 뭉개지지 않게 한다 */}
+              {count > 0 && (
+                <span className="num absolute top-0.5 right-0 min-w-[18px] h-[18px] px-[5px] bg-live text-paper text-[11px] font-bold rounded-full flex items-center justify-center ring-2 ring-paper">
+                  {count > 99 ? '99+' : count}
+                </span>
+              )}
+            </Link>
+
+            {user ? (
+              <div className="flex items-center gap-3 pl-2">
+                <span className="hidden sm:inline text-[14px]">
+                  <span className="font-semibold">{user.name}</span>님
+                </span>
+                <button
+                  className="text-[13px] text-mute hover:text-ink transition-colors"
+                  onClick={() => { logout(); toast('로그아웃했습니다.'); navigate('/'); }}
+                >
+                  로그아웃
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 pl-1">
+                <Link to="/login" className="text-[14px] px-2 py-1 hover:underline underline-offset-4">로그인</Link>
+                <Link to="/signup" className="hidden sm:inline-flex items-center h-9 px-4 bg-ink text-paper text-[13px] font-medium hover:bg-neutral-700 transition-colors">
+                  회원가입
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="mt-24 border-t border-line">
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-14 grid gap-10 md:grid-cols-[1.4fr_1fr_1fr]">
+        <div>
+          <p className="wordmark text-[22px]">OFFDAY</p>
+          <p className="mt-3 text-[14px] text-mute max-w-[34ch] leading-relaxed break-keep">
+            오늘 하루를 괜찮게 만드는 것들. 직접 써 보고 남긴 물건만 놓습니다.
+          </p>
+        </div>
+        <div className="text-[14px] space-y-2">
+          <p className="font-semibold mb-3">고객센터</p>
+          <p className="text-mute">평일 10:00 – 18:00</p>
+          <p className="num text-mute">1588-0000</p>
+        </div>
+        <div className="text-[14px] space-y-2">
+          <p className="font-semibold mb-3">배송과 교환</p>
+          <p className="text-mute">5만원 이상 무료배송</p>
+          <p className="text-mute">받은 날부터 7일 안에 교환·반품</p>
+        </div>
+      </div>
+      <div className="border-t border-line">
+        <p className="max-w-[1320px] mx-auto px-4 sm:px-6 py-5 text-[12px] text-mute">
+          실습용으로 만든 가상의 쇼핑몰입니다. 실제 판매나 결제는 일어나지 않습니다.
+        </p>
+      </div>
+    </footer>
+  );
+}
+
+// 담기는 로그인 없이도 된다. 비회원이면 브라우저에 남고, 로그인하면 계정으로 옮겨진다.
+function useAddToCart() {
+  const { addToCart } = useShop();
+  const { navigate } = useRouter();
+  const toast = useToast();
+
+  // silent 는 '구매하기'처럼 담은 직후 결제 화면으로 넘어가는 경우에 쓴다. 토스트가 겹치지 않게 한다.
+  return useCallback(async (product, qty = 1, { silent = false } = {}) => {
+    try {
+      await addToCart(product.id, qty);
+      if (!silent) {
+        toast(`${product.name} ${qty}개를 담았습니다.`, {
+          actionLabel: '장바구니 보기',
+          onAction: () => navigate('/cart'),
+        });
+      }
+      return true;
+    } catch (err) {
+      toast(err.message);
+      return false;
+    }
+  }, [addToCart, navigate, toast]);
+}
+
+function ProductCard({ product, priority }) {
+  const { inCart } = useShop();
+  const add = useAddToCart();
+  const [busy, setBusy] = useState(false);
+  const qtyInCart = inCart.get(product.id);
+
+  const onAdd = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setBusy(true);
+    await add(product, 1);
+    setBusy(false);
+  };
+
+  // 카드 전체가 눌리게 하되 담기 버튼은 살려 둔다.
+  // 링크를 상품명에 두고 가상요소로 카드를 덮어, a 안에 button 이 들어가지 않게 한다.
+  return (
+    <div className="group relative">
+      <div className="relative overflow-hidden bg-field" style={{ aspectRatio: '4 / 5' }}>
+        <img
+          src={product.image}
+          alt={product.name}
+          loading={priority ? 'eager' : 'lazy'}
+          className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
+        />
+
+        <div className="absolute top-0 left-0 flex flex-col items-start gap-1 p-2">
+          <Badge>{product.badge}</Badge>
+          {product.stock === 0 && <Badge>품절</Badge>}
+        </div>
+
+        {qtyInCart && (
+          <span className="num absolute top-2 right-2 bg-live text-paper text-[11px] font-bold px-2 py-1">
+            담김 {qtyInCart}
+          </span>
+        )}
+
+        {/* 데스크톱에서는 커서를 올렸을 때 올라오고, 호버가 없는 작은 화면에서는 늘 보인다 */}
+        <button
+          onClick={onAdd}
+          disabled={busy || product.stock === 0}
+          className="absolute inset-x-0 bottom-0 z-20 h-11 bg-ink text-paper text-[14px] font-medium transition-transform duration-200 disabled:opacity-60 md:translate-y-full md:group-hover:translate-y-0 md:focus-visible:translate-y-0"
+        >
+          {product.stock === 0 ? '품절' : busy ? '담는 중…' : '장바구니 담기'}
+        </button>
+      </div>
+
+      <div className="pt-3">
+        <p className="text-[11px] text-mute tracking-wide">{product.brand}</p>
+        <Link
+          to={`/product/${product.id}`}
+          className="block mt-1 text-[14px] leading-snug group-hover:underline underline-offset-4 decoration-1 before:absolute before:inset-0 before:z-10 before:content-['']"
+        >
+          {product.name}
+        </Link>
+        <div className="mt-2"><Price price={product.price} listPrice={product.listPrice} size="sm" /></div>
+        <Stars rating={product.rating} count={product.reviewCount} className="mt-2" />
+      </div>
+    </div>
+  );
+}
+
+function ProductGrid({ products, priorityCount = 4 }) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-4 sm:gap-x-5 gap-y-10 sm:gap-y-12">
+      {products.map((p, i) => (
+        <ProductCard key={p.id} product={p} priority={i < priorityCount} />
+      ))}
+    </div>
+  );
+}
+
+// 장바구니와 상품 상세가 함께 쓰는 수량 조절기
+function QtyStepper({ value, onChange, disabled, max = MAX_QTY }) {
+  const step = (delta) => onChange(Math.min(max, Math.max(1, value + delta)));
+
+  return (
+    <div className="inline-flex items-center border border-line h-10">
+      <button
+        className="w-10 h-full text-lg leading-none hover:bg-field disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        onClick={() => step(-1)}
+        disabled={disabled || value <= 1}
+        aria-label="수량 1개 줄이기"
+      >−</button>
+      <span className="num w-10 text-center text-[15px] font-semibold" aria-live="polite">{value}</span>
+      <button
+        className="w-10 h-full text-lg leading-none hover:bg-field disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        onClick={() => step(1)}
+        disabled={disabled || value >= max}
+        aria-label="수량 1개 늘리기"
+      >+</button>
+    </div>
+  );
+}
+
+// ========================================
+// 📄 홈
+// ========================================
+
+const SORTS = [
+  { value: 'recommend',  label: '추천순' },
+  { value: 'new',        label: '신상품순' },
+  { value: 'price_asc',  label: '낮은 가격순' },
+  { value: 'price_desc', label: '높은 가격순' },
+  { value: 'discount',   label: '할인율순' },
+  { value: 'rating',     label: '평점순' },
+];
+
+function Hero({ products }) {
+  const { navigate } = useRouter();
+
+  // 히어로에 세울 세 장은 실제 판매 상품에서 고른다
+  const picks = useMemo(() => {
+    const want = ['leather-rider', 'knit-runner-crimson', 'floral-eau-de-parfum'];
+    const chosen = want.map((slug) => products.find((p) => p.slug === slug)).filter(Boolean);
+    return chosen.length === 3 ? chosen : products.slice(0, 3);
+  }, [products]);
+
+  if (picks.length < 3) return null;
+
+  return (
+    <section className="max-w-[1320px] mx-auto px-4 sm:px-6 pt-10 sm:pt-16 pb-14">
+      <div className="grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-10 lg:gap-14 items-end">
+        <div className="lg:pb-16">
+          <p className="text-[13px] text-mute">2026 가을 · 서른 개의 물건</p>
+          <h1 className="headline mt-4 text-[40px] sm:text-[56px] lg:text-[62px] font-bold leading-[1.02]">
+            오늘 하루를<br />괜찮게 만드는 것들
+          </h1>
+          <p className="mt-6 text-[15px] sm:text-[16px] text-mute leading-relaxed max-w-[38ch] break-keep">
+            다섯 개 카테고리에서 서른 개만 골랐습니다. 유행을 따라가기보다 오래 쓰는 쪽을 봤습니다.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Button onClick={() => document.getElementById('catalog')?.scrollIntoView({ behavior: 'smooth' })}>
+              상품 보기
+            </Button>
+            <Button variant="secondary" onClick={() => navigate(`/product/${picks[0].id}`)}>
+              이번 주 픽 보기
+            </Button>
+          </div>
+        </div>
+
+        {/* 사진 세 장을 높이를 어긋나게 세워 편집 지면처럼 읽히게 한다 */}
+        <div className="grid grid-cols-3 gap-3 sm:gap-4">
+          {picks.map((p, i) => (
+            <Link
+              key={p.id}
+              to={`/product/${p.id}`}
+              className={`rise group block ${i === 0 ? 'pt-0' : i === 1 ? 'pt-10 sm:pt-16' : 'pt-4 sm:pt-8'}`}
+              style={{ animationDelay: `${i * 110}ms` }}
+            >
+              <div className="overflow-hidden bg-field" style={{ aspectRatio: i === 1 ? '3 / 5' : '3 / 4' }}>
+                <img src={p.image} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.05]" />
+              </div>
+              <p className="mt-2 text-[11px] text-mute truncate">{p.brand}</p>
+              <p className="text-[13px] leading-snug truncate group-hover:underline underline-offset-4">{p.name}</p>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HomePage() {
+  const [all, setAll] = useState([]);           // 카테고리 개수와 히어로용 전체 목록
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]); // 필터가 적용된 목록
+  const [category, setCategory] = useState('');
+  const [sort, setSort] = useState('recommend');
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // 전체 목록은 한 번만 받아 카테고리별 개수를 센다
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    api('/products')
+      .then((d) => {
+        if (!alive) return;
+        setAll(d.products);
+        setCategories(d.categories);
+      })
+      .catch((err) => { if (alive) setError(err.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [reloadKey]);
+
+  // 검색어는 조금 기다렸다 보낸다
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // 필터가 바뀔 때마다 서버에서 다시 받는다
+  useEffect(() => {
+    let alive = true;
+    setListLoading(true);
+    const params = new URLSearchParams();
+    if (category) params.set('category', category);
+    if (query) params.set('q', query);
+    params.set('sort', sort);
+
+    api(`/products?${params.toString()}`)
+      .then((d) => { if (alive) setProducts(d.products); })
+      .catch((err) => { if (alive) setError(err.message); })
+      .finally(() => { if (alive) setListLoading(false); });
+    return () => { alive = false; };
+  }, [category, query, sort, reloadKey]);
+
+  const counts = useMemo(() => {
+    const m = { '': all.length };
+    all.forEach((p) => { m[p.category] = (m[p.category] || 0) + 1; });
+    return m;
+  }, [all]);
+
+  if (loading) return <Spinner label="스토어를 여는 중" />;
+  if (error && all.length === 0) return <ErrorNotice message={error} onRetry={() => setReloadKey((k) => k + 1)} />;
+
+  const tabs = [{ value: '', label: '전체' }, ...categories.map((c) => ({ value: c, label: c }))];
+
+  return (
+    <>
+      <Hero products={all} />
+
+      <section id="catalog" className="max-w-[1320px] mx-auto px-4 sm:px-6 scroll-mt-28">
+        {/* 카테고리는 밑줄로 선택을 표시한다. 옆 숫자는 그 카테고리의 상품 수. */}
+        <div className="border-t border-ink pt-5 flex flex-col lg:flex-row lg:items-center gap-5 lg:gap-8">
+          <div className="flex gap-6 overflow-x-auto no-bar -mb-px">
+            {tabs.map((t) => {
+              const active = category === t.value;
+              return (
+                <button
+                  key={t.value || 'all'}
+                  onClick={() => setCategory(t.value)}
+                  aria-pressed={active}
+                  className={`shrink-0 pb-3 border-b-2 text-[16px] transition-colors ${active ? 'border-ink font-semibold' : 'border-transparent text-mute hover:text-ink'}`}
+                >
+                  {t.label}
+                  <span className="num ml-1.5 text-[12px] align-super">{counts[t.value] || 0}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex-1" />
+
+          <div className="flex items-center gap-3 pb-3">
+            <div className="relative flex-1 lg:w-64 lg:flex-none">
+              <IconSearch className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mute" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="상품이나 브랜드 검색"
+                aria-label="상품 검색"
+                className="w-full h-10 pl-9 pr-3 bg-field text-[14px] placeholder:text-mute focus:outline-none focus:ring-1 focus:ring-ink"
+              />
+            </div>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              aria-label="정렬 기준"
+              className="h-10 px-3 bg-paper border border-line text-[14px] focus:outline-none focus:border-ink"
+            >
+              {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className={`mt-8 transition-opacity duration-200 ${listLoading ? 'opacity-40' : 'opacity-100'}`}>
+          {products.length === 0 && !listLoading ? (
+            <EmptyState
+              title="조건에 맞는 상품이 없습니다"
+              body="검색어를 지우거나 다른 카테고리를 눌러 보세요."
+              action={<Button variant="secondary" onClick={() => { setSearch(''); setCategory(''); }}>전체 상품 보기</Button>}
+            />
+          ) : (
+            <ProductGrid products={products} />
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+// ========================================
+// 📄 상품 상세
+// ========================================
+
+function ProductPage({ params }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [qty, setQty] = useState(1);
+  const [busy, setBusy] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [askJoin, setAskJoin] = useState(false);
+
+  const { user, cart, inCart, addToCart, updateQty } = useShop();
+  const { navigate, path } = useRouter();
+  const add = useAddToCart();
+  const toast = useToast();
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    setQty(1);
+    api(`/products/${params.id}`)
+      .then((d) => { if (alive) setData(d); })
+      .catch((err) => { if (alive) setError(err.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [params.id, reloadKey]);
+
+  // 이미 장바구니에 있는 상품이면 수량 입력을 그 개수에 맞춰 둔다.
+  // 상품마다 한 번만 맞추고, 그 뒤 사용자가 고른 수량은 건드리지 않는다.
+  const syncedFor = useRef(null);
+  useEffect(() => {
+    const id = Number(params.id);
+    if (!data || !cart || syncedFor.current === id) return;
+    syncedFor.current = id;
+    const inCartQty = inCart.get(data.product.id);
+    if (inCartQty) setQty(inCartQty);
+  }, [data, cart, inCart, params.id]);
+
+  if (loading) return <Spinner label="상품을 불러오는 중" />;
+  if (error) {
+    return (
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6">
+        <ErrorNotice message={error} onRetry={() => setReloadKey((k) => k + 1)} />
+        <div className="text-center"><Link to="/" className="text-[14px] underline underline-offset-4">스토어로 돌아가기</Link></div>
+      </div>
+    );
+  }
+
+  const { product, related } = data;
+  const qtyInCart = inCart.get(product.id);
+  const soldOut = product.stock === 0;
+
+  const onAdd = async () => {
+    setBusy('add');
+    await add(product, qty);
+    setBusy(null);
+  };
+
+  // 담은 뒤 곧바로 주문/결제 화면으로 넘긴다.
+  // 이미 담긴 상품이면 수량을 더하지 않고 이 화면에서 고른 수량으로 맞춘다.
+  const goCheckout = async () => {
+    setBusy('buy');
+    try {
+      if (qtyInCart) await updateQty(product.id, qty);
+      else await addToCart(product.id, qty);
+      navigate('/checkout');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // 로그인하지 않았으면 먼저 가입을 권하고, 비회원 구매도 고를 수 있게 한다
+  const onBuyNow = () => {
+    if (!user) { setAskJoin(true); return; }
+    goCheckout();
+  };
+
+  return (
+    <div className="max-w-[1320px] mx-auto px-4 sm:px-6 pt-6 pb-16">
+      <nav className="text-[13px] text-mute mb-6" aria-label="현재 위치">
+        <Link to="/" className="hover:text-ink">스토어</Link>
+        <span className="mx-2 text-line">/</span>
+        <span>{product.category}</span>
+      </nav>
+
+      <div className="grid lg:grid-cols-2 gap-8 lg:gap-16">
+        <div className="bg-field overflow-hidden lg:sticky lg:top-32 self-start" style={{ aspectRatio: '4 / 5' }}>
+          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+        </div>
+
+        <div className="lg:pt-4">
+          <div className="flex items-center gap-2">
+            <Badge>{product.badge}</Badge>
+            <p className="text-[13px] text-mute tracking-wide">{product.brand}</p>
+          </div>
+
+          <h1 className="headline mt-3 text-[28px] sm:text-[34px] font-bold leading-tight">{product.name}</h1>
+          <Stars rating={product.rating} count={product.reviewCount} className="mt-3" />
+
+          <div className="mt-6 pb-6 border-b border-line">
+            <Price price={product.price} listPrice={product.listPrice} size="lg" />
+          </div>
+
+          <p className="mt-6 text-[15px] leading-[1.75] text-neutral-700 max-w-[46ch] break-keep">{product.description}</p>
+
+          <dl className="mt-8 text-[14px] border-t border-line">
+            {[
+              ['배송', product.price >= 50000 ? '무료배송 · 내일 도착' : '3,000원 · 5만원 이상 무료'],
+              ['남은 수량', soldOut ? '품절' : `${won(product.stock)}개`],
+              ['교환·반품', '받은 날부터 7일 안에'],
+            ].map(([k, v]) => (
+              <div key={k} className="flex gap-6 py-3 border-b border-line">
+                <dt className="w-24 shrink-0 text-mute">{k}</dt>
+                <dd>{v}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="mt-8 flex items-center gap-4">
+            <span className="text-[14px] text-mute">수량</span>
+            <QtyStepper value={qty} onChange={setQty} disabled={soldOut} max={Math.min(MAX_QTY, product.stock || MAX_QTY)} />
+            <span className="ml-auto text-[14px] text-mute">
+              합계 <span className="num text-ink font-bold text-[18px] ml-1">{won(product.price * qty)}</span>원
+            </span>
+          </div>
+
+          <div className="mt-5 flex flex-col sm:flex-row gap-3">
+            <Button size="lg" className="flex-1" onClick={onBuyNow} loading={busy === 'buy'} disabled={soldOut || busy === 'add'}>
+              {soldOut ? '품절된 상품입니다' : '구매하기'}
+            </Button>
+            <Button size="lg" variant="secondary" className="sm:w-48" onClick={onAdd} loading={busy === 'add'} disabled={soldOut || busy === 'buy'}>
+              장바구니 담기
+            </Button>
+          </div>
+
+          {qtyInCart && (
+            <p className="mt-3 text-[13px] text-live">이미 장바구니에 {qtyInCart}개 담겨 있습니다.</p>
+          )}
+        </div>
+      </div>
+
+      {related.length > 0 && (
+        <section className="mt-24">
+          <h2 className="headline text-[22px] font-bold border-t border-ink pt-5">{product.category}에서 함께 보는 상품</h2>
+          <div className="mt-8"><ProductGrid products={related} priorityCount={0} /></div>
+        </section>
+      )}
+
+      <Modal
+        isOpen={askJoin}
+        onClose={() => setAskJoin(false)}
+        title="회원가입 하시겠어요?"
+        actions={
+          <>
+            <Button
+              className="flex-1"
+              onClick={() => { setAskJoin(false); afterLogin.set(path); navigate('/signup'); }}
+            >
+              회원가입
+            </Button>
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => { setAskJoin(false); goCheckout(); }}
+            >
+              비회원 구매
+            </Button>
+          </>
+        }
+      >
+        회원 가입 후 구매 시 다양한 회원 혜택을 받을 수 있어요.
+      </Modal>
+    </div>
+  );
+}
+
+// ========================================
+// 📄 로그인 / 회원가입
+// ========================================
+
+// centered 면 사진 없이 폼만 화면 가운데에 놓고,
+// 아니면 좌측 전면 사진 + 우측 폼으로 펼친다(모바일에서는 사진을 접는다).
+function AuthLayout({ title, lead, children, footer, centered }) {
+  const form = (
+    <div className={`w-full max-w-[380px] ${centered ? 'text-center' : ''}`}>
+      <h1 className="headline text-[32px] font-bold">{title}</h1>
+      <p className="mt-2 text-[14px] text-mute break-keep">{lead}</p>
+      <div className={`mt-8 ${centered ? 'text-left' : ''}`}>{children}</div>
+      <div className="mt-6 text-[14px] text-mute text-center">{footer}</div>
+    </div>
+  );
+
+  if (centered) {
+    return (
+      <div className="min-h-[calc(100vh-140px)] flex items-center justify-center px-4 sm:px-6 py-16">
+        {form}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid lg:grid-cols-2 min-h-[calc(100vh-140px)]">
+      <div className="hidden lg:block relative bg-field overflow-hidden">
+        <img
+          src="https://images.unsplash.com/photo-1551028719-00167b16eac5?w=1100&h=1400&fit=crop&q=80"
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        {/* 밝은 사진 위에서도 글자가 읽히도록 아래쪽에만 그늘을 깐다 */}
+        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/75 to-transparent" aria-hidden="true" />
+        <p className="absolute bottom-12 left-10 right-10 text-paper text-[22px] font-semibold headline leading-snug">
+          담아 둔 것들은<br />로그인하면 그대로 있습니다
+        </p>
+      </div>
+
+      <div className="flex items-center justify-center px-4 sm:px-6 py-16">{form}</div>
+    </div>
+  );
+}
+
+function LoginPage() {
+  const { login } = useShop();
+  const { navigate } = useRouter();
+  const toast = useToast();
+
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const user = await login(form.email, form.password);
+      toast(`${user.name}님, 다시 오셨네요.`);
+      navigate(afterLogin.take() || '/');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthLayout
+      title="로그인"
+      lead="장바구니와 주문내역을 보려면 로그인해 주세요."
+      footer={<>아직 회원이 아니신가요? <Link to="/signup" className="text-ink underline underline-offset-4">회원가입</Link></>}
+    >
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        <Input
+          label="이메일" type="email" autoComplete="email" required
+          value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+          placeholder="name@example.com"
+        />
+        <Input
+          label="비밀번호" type="password" autoComplete="current-password" required
+          value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
+          placeholder="8자 이상"
+        />
+        {error && <p role="alert" className="text-[13px] text-sale">{error}</p>}
+        <Button type="submit" size="lg" className="w-full" loading={busy}>로그인</Button>
+      </form>
+    </AuthLayout>
+  );
+}
+
+function SignupPage() {
+  const { signup } = useShop();
+  const { navigate } = useRouter();
+  const toast = useToast();
+
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+
+    if (form.password.length < 8) {
+      setError('비밀번호는 8자 이상으로 만들어 주세요.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const user = await signup(form.email, form.password, form.name);
+      toast(`${user.name}님, 반갑습니다.`);
+      navigate(afterLogin.take() || '/');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthLayout
+      centered
+      title="회원가입"
+      lead="가입하시면 주문내역이 남고, 담아 둔 상품이 다음에 와도 그대로 있습니다."
+      footer={<>이미 계정이 있으신가요? <Link to="/login" className="text-ink underline underline-offset-4">로그인</Link></>}
+    >
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        <Input
+          label="이름" required maxLength={20}
+          value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+          placeholder="주문서에 쓸 이름"
+        />
+        <Input
+          label="이메일" type="email" autoComplete="email" required
+          value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+          placeholder="name@example.com"
+        />
+        <Input
+          label="비밀번호" type="password" autoComplete="new-password" required
+          value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
+          placeholder="8자 이상" hint="영문과 숫자를 섞으면 더 안전합니다."
+        />
+        {error && <p role="alert" className="text-[13px] text-sale">{error}</p>}
+        <Button type="submit" size="lg" className="w-full" loading={busy}>가입하고 시작하기</Button>
+      </form>
+    </AuthLayout>
+  );
+}
+
+// ========================================
+// 📄 장바구니
+// ========================================
+
+function CartRow({ item }) {
+  const { updateQty, removeFromCart } = useShop();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const { product, qty } = item;
+
+  const change = async (next) => {
+    setBusy(true);
+    try { await updateQty(product.id, next); }
+    catch (err) { toast(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await removeFromCart(product.id);
+      toast(`${product.name}을(를) 뺐습니다.`);
+    } catch (err) {
+      toast(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className={`py-6 border-b border-line flex gap-4 sm:gap-6 ${busy ? 'opacity-50' : ''}`}>
+      <Link to={`/product/${product.id}`} className="shrink-0 w-[88px] sm:w-[110px] bg-field overflow-hidden" style={{ aspectRatio: '4 / 5' }}>
+        <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+      </Link>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] text-mute tracking-wide">{product.brand}</p>
+            <Link to={`/product/${product.id}`} className="block mt-0.5 text-[15px] leading-snug hover:underline underline-offset-4">
+              {product.name}
+            </Link>
+            <div className="mt-2"><Price price={product.price} listPrice={product.listPrice} size="sm" /></div>
+          </div>
+
+          <button
+            onClick={remove}
+            disabled={busy}
+            aria-label={`${product.name} 장바구니에서 빼기`}
+            className="shrink-0 w-8 h-8 flex items-center justify-center text-mute hover:text-ink hover:bg-field transition-colors"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-4">
+          <QtyStepper value={qty} onChange={change} disabled={busy} />
+          <p className="text-[14px] text-mute">
+            <span className="num text-ink font-bold text-[18px]">{won(item.lineTotal)}</span>원
+          </p>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function CartPage() {
+  const { user, authReady, cart, clearCart } = useShop();
+  const { navigate } = useRouter();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  if (!authReady || !cart) return <Spinner label="장바구니를 불러오는 중" />;
+
+  if (cart.items.length === 0) {
+    return (
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6">
+        <EmptyState
+          title="장바구니가 비어 있습니다"
+          body="마음에 드는 상품을 담아 보세요."
+          action={<Button onClick={() => navigate('/')}>상품 보러 가기</Button>}
+        />
+      </div>
+    );
+  }
+
+  const remain = cart.freeShippingThreshold - cart.subtotal;
+  const progress = Math.min(100, Math.round((cart.subtotal / cart.freeShippingThreshold) * 100));
+
+  const empty = async () => {
+    setBusy(true);
+    try {
+      await clearCart();
+      toast('장바구니를 비웠습니다.');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-8">
+      <h1 className="headline text-[30px] sm:text-[36px] font-bold">
+        장바구니 <span className="num text-mute font-bold ml-1">{cart.count}</span>
+      </h1>
+
+      <div className="mt-8 grid lg:grid-cols-[minmax(0,1fr)_360px] gap-10 lg:gap-14 items-start">
+        <div>
+          <div className="flex items-center justify-between border-t-2 border-ink pt-4">
+            <p className="text-[14px] text-mute">전체 <span className="num text-ink font-semibold">{cart.totalQty}</span>개</p>
+            <button onClick={empty} disabled={busy} className="text-[13px] text-mute hover:text-ink underline underline-offset-4">
+              전체 비우기
+            </button>
+          </div>
+
+          <ul>
+            {cart.items.map((item) => <CartRow key={item.cartItemId} item={item} />)}
+          </ul>
+        </div>
+
+        <aside className="lg:sticky lg:top-32 bg-field p-6">
+          <h2 className="text-[16px] font-semibold">결제 예정 금액</h2>
+
+          {/* 무료배송까지 얼마 남았는지 바로 보여 준다 */}
+          <div className="mt-5">
+            {remain > 0 ? (
+              <p className="text-[13px]">
+                <span className="num font-bold">{won(remain)}</span>원 더 담으면 무료배송입니다
+              </p>
+            ) : (
+              <p className="text-[13px] font-medium">무료배송 조건을 채웠습니다</p>
+            )}
+            <div className="mt-2 h-1 bg-line" role="presentation">
+              <div className="h-full bg-ink transition-all duration-500" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+
+          <dl className="mt-6 space-y-3 text-[14px] border-t border-line pt-5">
+            <div className="flex justify-between">
+              <dt className="text-mute">상품 금액</dt>
+              <dd><span className="num font-semibold">{won(cart.subtotal + cart.discount)}</span>원</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-mute">상품 할인</dt>
+              <dd className="text-sale">−<span className="num font-semibold">{won(cart.discount)}</span>원</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-mute">배송비</dt>
+              <dd>{cart.shipping === 0 ? '무료' : <><span className="num font-semibold">{won(cart.shipping)}</span>원</>}</dd>
+            </div>
+          </dl>
+
+          <div className="mt-5 pt-5 border-t border-ink flex items-baseline justify-between">
+            <span className="text-[15px] font-semibold">합계</span>
+            <span className="text-[15px]">
+              <span className="num font-bold text-[28px]">{won(cart.total)}</span>원
+            </span>
+          </div>
+
+          <Button size="lg" className="w-full mt-6" onClick={() => navigate('/checkout')} disabled={busy}>
+            <span><span className="num font-bold">{won(cart.totalQty)}</span>개 주문하기</span>
+          </Button>
+          {!user && (
+            <p className="mt-3 text-[13px] text-mute break-keep">
+              로그인하지 않아도 주문할 수 있습니다.{' '}
+              <Link to="/signup" className="text-ink underline underline-offset-4">회원가입</Link>하면 주문내역이 남습니다.
+            </p>
+          )}
+          <button onClick={() => navigate('/')} className="w-full mt-3 text-[13px] text-mute hover:text-ink underline underline-offset-4">
+            계속 쇼핑하기
+          </button>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+// ========================================
+// 📄 주문 / 결제
+// ========================================
+
+function CheckoutPage() {
+  const { user, authReady, cart, placeOrder } = useShop();
+  const { navigate } = useRouter();
+
+  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [placed, setPlaced] = useState(null);
+
+  // 회원이면 가입할 때 적은 이름과 이메일을 미리 채워 준다
+  useEffect(() => {
+    if (user) setForm((f) => ({ ...f, name: f.name || user.name, email: f.email || user.email }));
+  }, [user]);
+
+  if (!authReady || !cart) return <Spinner label="주문서를 준비하는 중" />;
+
+  if (placed) {
+    return (
+      <div className="max-w-[560px] mx-auto px-4 sm:px-6 py-24 text-center">
+        <p className="headline text-[30px] font-bold">주문이 들어갔습니다</p>
+        <p className="mt-4 text-[15px] text-mute">주문번호 <span className="num text-ink font-semibold">{placed.orderNo}</span></p>
+        <p className="mt-1 text-[15px] text-mute">결제 금액 <span className="num text-ink font-bold text-[20px]">{won(placed.total)}</span>원</p>
+
+        {placed.isGuest && (
+          <p className="mt-6 text-[13px] text-mute break-keep max-w-[38ch] mx-auto">
+            비회원 주문이라 주문내역 화면에는 남지 않습니다. 주문번호를 따로 적어 두세요.
+          </p>
+        )}
+
+        <div className="mt-10 flex justify-center gap-3">
+          {placed.isGuest
+            ? <Button onClick={() => navigate('/signup')}>회원가입</Button>
+            : <Button onClick={() => navigate('/orders')}>주문내역 보기</Button>}
+          <Button variant="secondary" onClick={() => navigate('/')}>계속 쇼핑하기</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (cart.items.length === 0) {
+    return (
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6">
+        <EmptyState
+          title="주문할 상품이 없습니다"
+          body="장바구니에 상품을 담고 다시 와 주세요."
+          action={<Button onClick={() => navigate('/')}>상품 보러 가기</Button>}
+        />
+      </div>
+    );
+  }
+
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      setPlaced(await placeOrder(form));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-8">
+      <h1 className="headline text-[30px] sm:text-[36px] font-bold">주문 / 결제</h1>
+      {!user && (
+        <p className="mt-2 text-[14px] text-mute">비회원으로 주문합니다. 주문번호로 문의하실 수 있습니다.</p>
+      )}
+
+      <form onSubmit={submit} className="mt-8 grid lg:grid-cols-[minmax(0,1fr)_360px] gap-10 lg:gap-14 items-start" noValidate>
+        <div>
+          <h2 className="text-[16px] font-semibold border-t-2 border-ink pt-4">받는 분</h2>
+          <div className="mt-5 grid sm:grid-cols-2 gap-4">
+            <Input label="이름" required maxLength={20} value={form.name} onChange={set('name')} placeholder="홍길동" />
+            <Input label="연락처" required value={form.phone} onChange={set('phone')} placeholder="010-1234-5678" inputMode="tel" />
+            <Input
+              label="이메일" type="email" required className="sm:col-span-2"
+              value={form.email} onChange={set('email')} placeholder="name@example.com"
+              hint="주문 확인 메일을 이 주소로 보냅니다."
+            />
+            <Input
+              label="배송 주소" required className="sm:col-span-2"
+              value={form.address} onChange={set('address')} placeholder="서울시 강남구 테헤란로 1길 10, 101호"
+            />
+          </div>
+
+          <h2 className="text-[16px] font-semibold border-t border-line mt-10 pt-6">주문 상품 <span className="num text-mute ml-1">{cart.count}</span></h2>
+          <ul className="mt-2">
+            {cart.items.map((item) => (
+              <li key={item.cartItemId} className="py-5 border-b border-line flex gap-4 items-center">
+                <div className="w-16 shrink-0 bg-field overflow-hidden" style={{ aspectRatio: '4 / 5' }}>
+                  <img src={item.product.image} alt="" className="w-full h-full object-cover" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] text-mute">{item.product.brand}</p>
+                  <p className="text-[14px] leading-snug">{item.product.name}</p>
+                </div>
+                <p className="text-[13px] text-mute shrink-0 text-right">
+                  <span className="num text-ink font-semibold">{won(item.lineTotal)}</span>원<br />
+                  <span className="num">{item.qty}</span>개
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <aside className="lg:sticky lg:top-32 bg-field p-6">
+          <h2 className="text-[16px] font-semibold">결제 금액</h2>
+
+          <dl className="mt-5 space-y-3 text-[14px] border-t border-line pt-5">
+            <div className="flex justify-between">
+              <dt className="text-mute">상품 금액</dt>
+              <dd><span className="num font-semibold">{won(cart.subtotal + cart.discount)}</span>원</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-mute">상품 할인</dt>
+              <dd className="text-sale">−<span className="num font-semibold">{won(cart.discount)}</span>원</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-mute">배송비</dt>
+              <dd>{cart.shipping === 0 ? '무료' : <><span className="num font-semibold">{won(cart.shipping)}</span>원</>}</dd>
+            </div>
+          </dl>
+
+          <div className="mt-5 pt-5 border-t border-ink flex items-baseline justify-between">
+            <span className="text-[15px] font-semibold">결제 금액</span>
+            <span className="text-[15px]">
+              <span className="num font-bold text-[28px]">{won(cart.total)}</span>원
+            </span>
+          </div>
+
+          {error && <p role="alert" className="mt-4 text-[13px] text-sale break-keep">{error}</p>}
+
+          <Button type="submit" size="lg" className="w-full mt-6" loading={busy}>
+            <span><span className="num font-bold">{won(cart.total)}</span>원 결제하기</span>
+          </Button>
+          <button type="button" onClick={() => navigate('/cart')} className="w-full mt-3 text-[13px] text-mute hover:text-ink underline underline-offset-4">
+            장바구니로 돌아가기
+          </button>
+
+          <p className="mt-5 text-[12px] text-mute break-keep">
+            실습용 화면이라 실제 결제는 일어나지 않습니다.
+          </p>
+        </aside>
+      </form>
+    </div>
+  );
+}
+
+// ========================================
+// 📄 주문내역
+// ========================================
+
+function OrdersPage() {
+  const { user, authReady } = useShop();
+  const { navigate, path } = useRouter();
+  const [orders, setOrders] = useState(null);
+  const [error, setError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    setError(null);
+    api('/orders', { auth: true })
+      .then((d) => { if (alive) setOrders(d.orders); })
+      .catch((err) => { if (alive) setError(err.message); });
+    return () => { alive = false; };
+  }, [user, reloadKey]);
+
+  if (!authReady) return <Spinner label="확인하는 중" />;
+
+  if (!user) {
+    return (
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6">
+        <EmptyState
+          title="로그인하면 주문내역을 볼 수 있습니다"
+          action={<Button onClick={() => { afterLogin.set(path); navigate('/login'); }}>로그인</Button>}
+        />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6">
+        <ErrorNotice message={error} onRetry={() => setReloadKey((k) => k + 1)} />
+      </div>
+    );
+  }
+
+  if (!orders) return <Spinner label="주문내역을 불러오는 중" />;
+
+  if (orders.length === 0) {
+    return (
+      <div className="max-w-[1320px] mx-auto px-4 sm:px-6">
+        <EmptyState
+          title="아직 주문한 상품이 없습니다"
+          body="장바구니에 담고 주문하면 여기에 쌓입니다."
+          action={<Button onClick={() => navigate('/')}>상품 보러 가기</Button>}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[900px] mx-auto px-4 sm:px-6 py-8">
+      <h1 className="headline text-[30px] sm:text-[36px] font-bold">주문내역</h1>
+
+      <div className="mt-8 border-t-2 border-ink">
+        {orders.map((order) => (
+          <article key={order.id} className="py-7 border-b border-line">
+            <header className="flex flex-wrap items-baseline justify-between gap-2">
+              <div>
+                <p className="text-[14px] font-semibold">{formatDate(order.createdAt)}</p>
+                <p className="text-[12px] text-mute mt-0.5">주문번호 <span className="num">{order.orderNo}</span></p>
+              </div>
+              <p className="text-[14px]">
+                결제 <span className="num font-bold text-[18px]">{won(order.total)}</span>원
+              </p>
+            </header>
+
+            <ul className="mt-5 space-y-4">
+              {order.items.map((it, i) => (
+                <li key={i} className="flex gap-4 items-center">
+                  <div className="w-14 shrink-0 bg-field overflow-hidden" style={{ aspectRatio: '4 / 5' }}>
+                    <img src={it.image} alt="" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] text-mute">{it.brand}</p>
+                    <p className="text-[14px] truncate">{it.name}</p>
+                  </div>
+                  <p className="text-[13px] text-mute shrink-0">
+                    <span className="num text-ink font-semibold">{won(it.price)}</span>원 · <span className="num">{it.qty}</span>개
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ========================================
+// 🚀 App
+// ========================================
+
+function NotFoundPage() {
+  const { navigate } = useRouter();
+  return (
+    <div className="max-w-[1320px] mx-auto px-4 sm:px-6">
+      <EmptyState
+        title="없는 주소입니다"
+        body="주소를 다시 확인하거나 스토어로 돌아가 주세요."
+        action={<Button onClick={() => navigate('/')}>스토어로 가기</Button>}
+      />
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <ToastProvider>
+        <ShopProvider>
+          <div className="min-h-screen flex flex-col">
+            <Header />
+            <main className="flex-1">
+              <Routes notFound={<NotFoundPage />}>
+                <Route path="/"            element={<HomePage />} />
+                <Route path="/product/:id" element={<ProductPage />} />
+                <Route path="/cart"        element={<CartPage />} />
+                <Route path="/checkout"    element={<CheckoutPage />} />
+                <Route path="/orders"      element={<OrdersPage />} />
+                <Route path="/login"       element={<LoginPage />} />
+                <Route path="/signup"      element={<SignupPage />} />
+              </Routes>
+            </main>
+            <Footer />
+          </div>
+        </ShopProvider>
+      </ToastProvider>
+    </Router>
+  );
+}
+
+// ========================================
+// Rendering
+// ========================================
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
