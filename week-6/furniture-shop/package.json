@@ -1,0 +1,16 @@
+{
+  "name": "gyeol-furniture-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GYEOL - 미니멀 가구 쇼핑몰 (이메일/비밀번호 JWT 인증, PostgreSQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.13.1"
+  }
+}
